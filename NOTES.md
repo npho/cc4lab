@@ -75,3 +75,137 @@ jaxborg paths are relative to `../jaxborg` at commit `b85bc32`.
   intentional CybORG parity). Coalition masking changes which action is
   submitted, so it can change action cost on busy ticks with no effect on
   the env.
+
+## Milestone 1: feasibility spike
+
+All runs: macOS, CPU backend (`cpu:0`), jax 0.10.0, jaxborg `b85bc32`,
+blue policy `random_valid`. Raw output is in `results/spike/`, which is gitignored;
+rerun with `uv run python scripts/spike/<name>.py`.
+
+### 1. Throughput (`benchmark.py`)
+
+500-step rollouts. steps/s excludes compile and reset.
+
+| engine | batch | compile (s) | run (s) | steps/s |
+|---|---|---|---|---|
+| jaxborg, no vmap | 1 | 14.5 | 0.76 | **657** |
+| jaxborg, vmap | 1 | 334.9 | 5.82 | 86 |
+| jaxborg, vmap | 32 | 42.1 | 26.10 | 613 |
+| jaxborg, vmap | 1024 | 49.7 | 1815.96 | 282 |
+| CybORG `EnterpriseMAE`, 1 process | 1 | (setup 0.09) | 6.74 | 74 |
+
+- **On CPU, vmap hurts.** Under `vmap`, `lax.cond` becomes `select`, so every
+  branch of jaxborg's action and red-FSM dispatch runs for every env. One
+  episode without vmap runs ~8× faster than vmapped batch 1. Batch 1024
+  gets *less* total throughput than batch 32. Compile time also blows up
+  (335 s vmapped vs 14.5 s unbatched). The no-vmap row is in
+  `benchmark_novmap.json`.
+- On CPU, the efficient layout is `lax.map` (sequential, real branches)
+  inside each process, plus process-level parallelism. GPU is untested here.
+  There, vmap should still win (jaxborg's README reports 2,512 steps/s
+  at 1024 envs on an A6000), and unagi must measure it.
+- **[unverified] "CybORG ~7 steps/s per process": corrected.** On this
+  machine, one CybORG process with random-valid actions runs **74 steps/s**.
+  The ~7 figure was 332/48 from jaxborg's PPO training runs, which include
+  learner overhead and 48-way contention. jaxborg without vmap is still ~9×
+  faster per process. The handoff's case for jaxborg holds (branching
+  matters more than speed), but the speed gap on CPU is ~9×, not ~100×.
+
+### 2. Branch determinism (`branching.py`): **PASS**
+
+At t = 100 and t = 250, all of these hold bitwise (structure, dtype, shape, bytes):
+- the prefix equals the first t steps of the full run;
+- two continuations from a copied state with the same key give identical
+  actions, rewards, and final `EnvState`;
+- the branched continuation **replays the unbranched run** exactly,
+  including the final state. The key schedule depends only on
+  `(episode_key, state.time)`, so the copy loses nothing;
+- a different key changes actions and rewards. The first divergence is at
+  the branch step.
+
+In-progress timers live in `SimulatorState` (`src/jaxborg/state.py`):
+`blue_pending_ticks`, `blue_pending_action` (per blue agent), and
+`red_pending_ticks`, `red_pending_action`, `red_pending_key` (per red agent).
+The logic is in `actions/duration.py` `process_blue_with_duration`. The copy
+(`jax.tree.map(jnp.copy, state)`) carries them. Timer probe at t = 100:
+`blue_pending_ticks = [1,1,1,0,4]`. Changing a busy agent's submitted
+action (Sleep vs BlockTraffic) leaves the next state bitwise identical.
+Changing the idle agent's action changes `blocked_zones` and
+`blue_pending_action`.
+
+### 3. Seed count K (`variance.py`)
+
+Per-episode σ of total return (100 full episodes):
+- independent topologies: σ = **966** (mean −5105);
+- one fixed topology, different episode keys: σ = **630** (mean −4298).
+
+σ of D = V(all actual) − V(agent 0 → always-Sleep), from t = 250 to 500,
+256 keys at each of 4 branch states (distinct topologies and prefixes):
+
+| base | mean D | σ_D CRN | σ_D indep | corr(V_all, V_swap) CRN |
+|---|---|---|---|---|
+| 0 | 485.7 | 155.9 | 713.0 | 0.944 |
+| 1 | 79.6 | 237.8 | 443.6 | 0.735 |
+| 2 | 191.4 | 222.7 | 426.0 | 0.723 |
+| 3 | 71.9 | 167.9 | 499.6 | 0.894 |
+| pooled | | **199.2** | **533.0** | |
+
+CRN cuts variance by **7.2×**. Recommended K for 2·σ_D/√K ≤ 50:
+
+| | pooled σ | worst base |
+|---|---|---|
+| CRN | **K = 64** | K = 91 |
+| independent | K = 455 | K = 814 |
+
+Caveats: the "actual" policy is random-valid, not trained. A trained policy
+is less noisy per action but may make agent-0 effects larger, so K must be
+rechecked once a real policy exists. Here agent 0 → Sleep *raises* return
+in every base, because random blue Restores cost −1 each.
+
+Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
+512k steps, about 13 min on one CPU core at 657 steps/s.
+
+### 4. Reward structure (`reward_check.py`): **PASS**
+
+- **One shared team reward.** All 5 blue agents get the same scalar every
+  step (spread 0.0). `env.py:491-497` assigns one value to every blue
+  agent. `fsm_red_env.py`'s post-step update touches only FSM fields.
+- **Per-zone components are recoverable** from state, with no jaxborg changes.
+  `const.phase_rewards[mission_phase]` gives the (subnet, [LWF, ASF, RIA])
+  weights, and `green_lwf_this_step`, `green_asf_this_step`,
+  `red_impact_attempted` give the per-host flags. Grouping by
+  `const.host_subnet` (masked by `host_active`) rebuilds `info`'s
+  `reward_lwf/asf/ria` and the total with max error 0.0. This is the same
+  formula as `rewards.py` `compute_reward_breakdown`.
+- Action cost is per agent (−1 per submitted Restore), so it can be
+  attributed directly. Episode example: [−73, −78, −79, −54, −92].
+- Subnet ownership (`const.blue_agent_subnets`): blue_0 RESTRICTED_ZONE_A,
+  blue_1 OPERATIONAL_ZONE_A, blue_2 RESTRICTED_ZONE_B, blue_3
+  OPERATIONAL_ZONE_B, blue_4 ADMIN/OFFICE/PUBLIC_ACCESS. No one owns
+  CONTRACTOR_NETWORK or INTERNET.
+
+## Spike verdict
+
+**Go**, with one design change for CPU.
+
+- **Throughput:** jaxborg runs 657 steps/s per CPU process without vmap
+  (613 at vmap 32, 282 at vmap 1024). CybORG runs 74. GPU is unmeasured.
+- **Branching: PASS** at t = 100 and 250. Continuations are bitwise
+  reproducible and replay the unbranched run. Timers are carried in
+  `SimulatorState.{blue,red}_pending_*`.
+- **Recommended K = 64 under CRN** (91 for the worst branch state; 455
+  without CRN). Use CRN.
+- **Reward:** one shared team scalar. Per-subnet LWF/ASF/RIA and per-agent
+  Restore cost can be rebuilt exactly from state.
+- **[unverified] claims:**
+  - obs dim 210, action dim 242, agents 0–3 zero-padded with masking: **confirmed**.
+  - one shared actor-critic for all 5 agents: **confirmed** as the
+    default arch (others exist).
+  - `uv sync --extra cpu`: **confirmed**. `uv sync --extra cuda`:
+    **corrected**, because jaxborg's override drops the CUDA plugin. cc4lab adds
+    `jax-cuda12-plugin` itself; still unchecked on a GPU host.
+  - CybORG ~7 steps/s per process: **corrected** to 74 measured
+    (single process, random policy).
+- **Change for Milestone 2:** the handoff's "32×K rollouts in one vmap call"
+  is right for GPU but ~8× slow on CPU. `rollout.py` should take a
+  `batch_mode` (`vmap` | `map`) so each backend can use its fast path.
