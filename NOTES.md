@@ -445,3 +445,65 @@ episodes for the per-episode spread). Raw output is in `~/cc4lab-exp/results/var
   weak policy for those agents, or Sleep being an odd reference; busy-tick cost does not explain it (it moved
   values only 9-19 points). Not investigated.
 
+## Four training seeds
+
+Seeds 43, 44 and 45 were trained with the same recipe as seed 42 (`default.yaml`, 500k steps, 8 envs); the
+three ran in parallel, about 78 min each. Final training reward (one noisy batch): -2615, -2563, -2231
+(seed 42: -2568). Models are in `~/cc4lab-exp/{ippo_jax/default_seed42,s43,s44,s45}`; raw results and logs
+in `~/cc4lab-exp/results/` (outside the repo).
+
+- **Evaluation** (`scripts/eval_checkpoint.py`, the same 32 episodes for every policy, mean +/- SE):
+
+  | policy | mean return |
+  |---|---|
+  | seed 42 | -2265 +/- 135 |
+  | seed 43 | -2683 +/- 148 |
+  | seed 44 | -2163 +/- 130 |
+  | seed 45 | -2091 +/- 135 |
+  | random_valid | -5037 +/- 157 |
+  | always_sleep | -6260 +/- 208 |
+
+  All four are far better than the baselines, but they differ from each other by up to 592 points
+  (seed 43 vs 45, about 3 standard errors unpaired); seed-to-seed standard deviation is about 265. An
+  attribution result describes one specific policy, and policy variability is comparable to some of the
+  effects measured, so final results should be reported across seeds or the chosen policy justified.
+- **Per-agent swap to Sleep** (`variance_trained.py`, 4 bases, keys per base 128 for seed 42 and 32 for the
+  others; mean D = all actual minus agent i swapped, +/- SE from the CRN spread over keys):
+
+  | seed | agent 0 | agent 1 | agent 2 | agent 3 | agent 4 |
+  |---|---|---|---|---|---|
+  | 42 | -204 +/- 9 | 335 +/- 8 | 187 +/- 7 | 536 +/- 12 | -130 +/- 5 |
+  | 43 | 44 +/- 16 | 71 +/- 9 | 149 +/- 13 | 576 +/- 25 | -189 +/- 9 |
+  | 44 | 112 +/- 9 | 87 +/- 7 | 138 +/- 8 | 274 +/- 24 | -345 +/- 15 |
+  | 45 | 87 +/- 11 | 138 +/- 9 | 168 +/- 9 | 990 +/- 33 | -232 +/- 17 |
+
+  These SEs only cover key sampling at 4 branch states; per-base values vary by hundreds, so they do not
+  express uncertainty about behavior in general.
+  - **Agent 4 is worse than Sleep in all four seeds and in all 16 (seed, base) cells** (-98 to -445):
+    a pattern, not a seed quirk.
+  - **Agent 0's negative value was specific to seed 42**: positive for seeds 43-45, and its sign varies by base.
+  - Agent 3 is the most valuable agent in every seed (+274 to +990); agents 1 and 2 are positive throughout.
+- **K by policy** (CRN, pooled, max over agents): 127 (seed 42), 126, 115, 220. Seeds 43-45 used only 32
+  keys, so their sigma (and K, which goes with sigma squared) is uncertain by perhaps 25%. A working K of
+  about 130 holds for most policies; budget up to about 220.
+- **The trained policies are barely sharper than random.** Sleep plus Monitor is under about 5% of steps
+  for every agent, and the action mix stays near uniform over valid actions (`scripts/action_mix.py`; recipe
+  entropy about 3.84 against a maximum near 5.5). Agent 4 restores 11.7 / 13.2 / 15.2 / 13.5% of its steps
+  (seeds 42-45), the most of any agent in seeds 43-45.
+- **Why agent 4 loses to Sleep** (`scripts/swap_decomposition.py`, 3 bases x 16 keys, D split by reward term):
+
+  | seed | agent 4: LWF | ASF | RIA | restore cost | total D |
+  |---|---|---|---|---|---|
+  | 42 | +11 | -103 | +3 | -27 | -116 |
+  | 43 | +11 | -164 | +4 | -31 | -180 |
+  | 44 | +8 | -338 | +6 | -28 | -353 |
+  | 45 | +20 | -224 | +7 | -33 | -230 |
+
+  The harm is almost entirely **ASF** (green access-service failure); Restore cost is only 27-33 points
+  (8-29% of the total). Across the four seeds the ASF harm ranks in the same order as agent 4's Restore share
+  (-103, -164, -224, -338 vs 11.7, 13.2, 13.5, 15.2%), which is suggestive but four points; **which action
+  type causes it was not tested.** For agent 0 the same split gives LWF +61 to +141 (helpful) in every seed
+  and ASF -173 to +1, so its net sign depends on the seed.
+- **Not investigated:** the cause of agent 4's ASF harm; whether the recipe's full 3M steps (about 8 h per
+  run at this speed, with 48 envs) would change the picture. These policies used a sixth of that budget.
+

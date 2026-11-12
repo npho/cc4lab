@@ -82,6 +82,10 @@ install. cc4lab never needs them to run; two cases do:
   uv run python scripts/eval_checkpoint.py ~/cc4lab-exp/ippo_jax/default_seed42/model_default_seed42.safetensors
   ```
 
+  Two diagnostics for trained policies: `scripts/action_mix.py` (share of steps per action type,
+  per agent) and `scripts/swap_decomposition.py` (an agent's marginal contribution split into LWF, ASF,
+  RIA and Restore cost).
+
   Only the `shared` architecture is supported by the loader. The sidecar's
   `git_commit` is the commit of the directory the trainer was launched from
   (not necessarily jaxborg), so record the jaxborg pin yourself next to results.
