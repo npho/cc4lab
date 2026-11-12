@@ -115,8 +115,11 @@ Run the tests (no GPU needed) with:
 uv run pytest
 ```
 
-Coalition-masked rollouts, the rulebook agent and rule-violation flags are not
-implemented yet; see `NOTES.md`, "Milestone 2 progress".
+`cc4lab.policies.rulebook.firewall_rulebook` is the reference agent (first rule:
+firewall matches the mission phase's communication policy) and
+`cc4lab.rules.firewall_violations` flags agents that leave a mismatch unaddressed.
+Coalition-masked rollouts are not implemented yet; see `NOTES.md`,
+"Milestone 2 progress".
 
 ## Spikes (Milestone 1)
 

@@ -255,6 +255,34 @@ Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
   `coalition_masks()` returns the `(32, 5)` bool masks in index order.
 - Leave-one-out misses redundancy: if any 2 of 3 agents suffice, every agent
   scores 0, while Shapley gives each 1/3 (tested).
+- **Done: rulebook reference agent and violation flags** (`policies/rulebook.py`,
+  `rules.py`; `tests/test_rulebook.py`, 4 tests). First rule only: the firewall
+  matches the mission phase's communication policy for each subnet the agent observes.
+  - It is a pure function of `obs` and `masks`. The obs holds, per observed subnet,
+    a one-hot, a `blocked` row and a `comms` row in CybORG subnet order
+    (`observations.py`). `comms_policy` is "True = not connected" (`state.py:43`);
+    `blocked_zones[dst, src]` is what Block/AllowTraffic write (`actions/blue_traffic.py`).
+    A mismatch is fixed with BlockTrafficZone (policy blocked, firewall open) or
+    AllowTrafficZone (the reverse). Action indices follow `encode_blue_action`:
+    the destination slot is the observation block slot, and the source offset skips the destination.
+  - **Trap: the comms-policy diagonal is `True` for every subnet** (a subnet toward
+    itself is "not connected"). The rule must exclude `src == dst`, or it would try to
+    "fix" a nonexistent link forever.
+  - It fixes one mismatch per step (first in slot, column order), only if the action is
+    valid under the mask, else it submits `default_action` (Sleep; `make_firewall_rulebook`
+    takes another, e.g. Monitor). Sleep vs Monitor is not decided; it does not change
+    this rule's behaviour but may matter once more rules exist.
+  - Starting states are far out of compliance (e.g. agent 1 has 7 mismatches in phase 0),
+    and from a fresh episode the rulebook reaches full compliance within 25 steps and
+    re-adapts after a phase change (tested). The first-action test uses jaxborg's own
+    encoder as an independent oracle; a Block/Allow swap mutation makes it fail.
+  - **The rulebook never emits Restore**, so the busy-agent action-cost caveat above
+    does not apply to it: a busy agent re-submitting a Block/Allow is ignored and costs nothing.
+  - `rules.firewall_violations(obs, actions, masks=None, busy=None)` returns
+    `firewall_mismatch` (state: the obs shows a disagreement) and `firewall_unaddressed`
+    (mismatch present and the chosen action fixes none). Observations do not say whether
+    an agent is busy, so pass `busy = blue_pending_ticks > 0` to exempt busy agents.
+    Any fixing action counts as addressing; it does not demand the rulebook's order.
 - **Not started, deferred by Nam (2026-11-11):**
   1. Train a real blue policy (500k steps, ~25 min on this CPU) and re-measure K.
   2. Busy-tick action-cost semantics for coalition masking (see "Milestone 2 caveat
@@ -263,5 +291,5 @@ Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
   3. How branch points (which failures, which step) are chosen; ties into the
      ex-ante vs ex-post decision.
   Also remaining for Milestone 2: coalition-masked `rollout.py` with the
-  `batch_mode` (`vmap` | `map`) switch, `rulebook.py`, `rules.py`.
+  `batch_mode` (`vmap` | `map`) switch.
 
