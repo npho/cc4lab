@@ -76,7 +76,7 @@ install. cc4lab never needs them to run; two cases do:
   recipe notes say returns plateau by ~500k steps.
 
   Load and check a checkpoint with `cc4lab.policies.loaders.load_policy`, or
-  play it against the trivial baselines:
+  play it (several checkpoints at once are fine) against the baselines (random, sleep, firewall rulebook):
 
   ```bash
   uv run python scripts/eval_checkpoint.py ~/cc4lab-exp/ippo_jax/default_seed42/model_default_seed42.safetensors

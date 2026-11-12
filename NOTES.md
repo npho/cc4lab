@@ -293,3 +293,42 @@ Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
   Also remaining for Milestone 2: coalition-masked `rollout.py` with the
   `batch_mode` (`vmap` | `map`) switch.
 
+## First trained policy and reference comparison
+
+- **Run:** jaxborg recipe `default.yaml` (IPPO, `shared` arch), seed 42, 500k steps, 8 envs
+  (the recipe's default is 48), jaxborg `b85bc324`. 2326 s wall, 215 steps/s average (slowed by
+  concurrent test runs). Launched from a non-git directory, so the sidecar's `git_commit` is
+  empty; the pin above is the record. Artifacts are outside the repo, in
+  `~/cc4lab-exp/ippo_jax/default_seed42/` (final `model_default_seed42.safetensors` +
+  sidecar, checkpoints at 200k and 400k, `metrics.jsonl`).
+- **Training curve** (`train_episode_reward_mean`, one noisy batch per update): -5252 at
+  update 1, -1678 at 204k steps, -2192 at 304k, -2765 at 404k, -2568 at 500k.
+- **Evaluation** (`scripts/eval_checkpoint.py`, 32 full episodes, the same seeds 0-31 and topologies
+  for every policy, mean +/- standard error):
+
+  | policy | mean return |
+  |---|---|
+  | trained, 200k steps | -2055 +/- 112 |
+  | trained, 400k steps | -2774 +/- 159 |
+  | **trained, 500k (final)** | **-2265 +/- 135** |
+  | firewall_rulebook | -6262 +/- 209 |
+  | random_valid | -5037 +/- 157 |
+  | always_sleep | -6260 +/- 208 |
+
+- **Reading it.** The trained policy is far better than random and sleep. Performance fluctuates
+  across training: 200k vs 400k differ significantly (720 +/- 194); final vs 200k does not
+  (210 +/- 175). The final checkpoint is the one to use: choosing the best of three on
+  the same eval seeds would bias it. The recipe notes report -1998 +/- 118 at 3M steps, but that is a
+  training metric over 3 seeds with a different budget, so this is a rough comparison, not a
+  replication. This is **one training seed**; seed-to-seed spread is unknown.
+- **Finding: the firewall-only rulebook is indistinguishable from doing nothing.** -6262 +/- 209
+  vs -6260 +/- 208 for always_sleep at n=32. It does act: paired on 6 episodes, the final firewall differs
+  in 28 cells and per-step rewards differ on 80-160 of 500 steps, but the per-episode
+  return difference ranges -164 to +109 (mean about -1) against episode totals of -5000 to -10000, so
+  enforcing the comms policy has no systematic effect on return. Consequence: with
+  only this rule, "agent i follows the reference" is value-equivalent to "agent i sleeps", so
+  marginal contributions measured against it cannot be told apart from those measured against Sleep.
+  Whether that is acceptable depends on which further rules the team adds (their decision).
+  Why the rule has so little effect was not investigated.
+- **Not yet done:** re-measure K with this policy (the spike's K = 64 used random policies).
+
