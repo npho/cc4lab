@@ -124,10 +124,14 @@ random keys (`batch_mode`: `map` for CPU, `vmap` for GPU; `cost_mode`: `raw` or
 
 ```bash
 uv run python scripts/attribute_branch.py MODEL.safetensors --branch-t 250 --keys 4
+# or branch around the worst failure window of the observed episode:
+uv run python scripts/attribute_branch.py MODEL.safetensors --worst-window 20 --term ria --keys 8
 ```
 
-It prints Shapley values and the leave-one-out baseline with standard errors and
-checks efficiency; results are written to `results/attribution/` (gitignored).
+Key 0 is the observed episode's own key, so the output has both the realized
+(that failure) and the expected (over fresh randomness) attribution. It prints
+Shapley values and the leave-one-out baseline with standard errors and checks
+efficiency; results are written to `results/attribution/` (gitignored).
 `--reference` (`sleep` or `rulebook`) and `--cost-mode` expose the open design choices.
 See `NOTES.md`, "Coalition rollouts and the first end-to-end attribution".
 

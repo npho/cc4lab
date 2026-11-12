@@ -367,3 +367,49 @@ Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
 - Leave-one-out and Shapley agree closely here (no strong redundancy at this branch); the
   difference between them is within the standard errors.
 
+## Branch points
+
+- **What failures look like** (16 full episodes, trained policy, seeds 0-15): every episode has red
+  impact; it hits on 46-137 of 500 steps in 43-115 separate bursts, first at step 3-66 (median 13.5).
+  Green local-work failure is usually the largest cost (about -200 to -2000 per episode), then
+  access-service failure, with red impact the smallest (about -140 to -630). Phase boundaries are at
+  steps 167 and 334 in every episode. So failures are a continuous stream of penalties, not rare
+  events, and "branch before the first impact" would pick step 0-20 almost every time.
+- **Design: a failure is a window** (`cc4lab/failures.py`, `tests/test_failures.py`, 7 tests).
+  `observed_profile` replays an episode and splits the reward by subnet and term (LWF, ASF, RIA; same
+  decomposition as spike 4, excludes Restore cost). `find_windows(profile, W, n, term)` ranks
+  non-overlapping worst windows of W steps, for the total or one term. `plan` branches `lookback`
+  steps before the window and evaluates through it plus `tail` steps, so the horizon is bounded
+  instead of running to the episode end (a shorter horizon should also lower the variance of v(S);
+  not yet measured).
+- **Realized vs expected (my reading of the ex-post / ex-ante choice; confirm with the team).**
+  Key 0 of the K shared keys is the observed episode's own key, so the all-actual coalition replays
+  the observed failure exactly (tested; and the script's replay check matched to the digit:
+  -950.0 vs -950.0). Shapley for key 0 is the *realized* attribution of this specific failure;
+  the mean over keys is the *expected* attribution from the branch state, which does not condition on
+  the failure happening. They can differ in sign (below).
+- **CLI:** `scripts/attribute_branch.py --worst-window W [--rank R] [--term total|lwf|asf|ria]
+  [--lookback L] [--tail T]`, or `--branch-t T [--horizon H]` for a fixed step.
+- **First run** (episode seed 0, W = 20, `--term ria`, lookback 20, tail 50, reference Sleep, raw
+  cost, K = 4): window steps 232-251, mostly OPERATIONAL_ZONE_A red impact, reward -42 over the window;
+  branched at 212, 90 steps. Efficiency error 2.3e-5.
+
+  | agent | Shapley realized (key 0) | Shapley expected (mean +/- SE) |
+  |---|---|---|
+  | 0 | -8 | -31 +/- 23 |
+  | 1 | -28 | +36 +/- 32 |
+  | 2 | -8 | -14 +/- 3 |
+  | 3 | -3 | +3 +/- 5 |
+  | 4 | -1 | -11 +/- 4 |
+
+  Values are tens of points with standard errors of similar size, and the window itself is only
+  -42 of a -950 horizon, so at K = 4 this demonstrates the mechanism, not a finding.
+- **Caveats, not yet measured:** the window is selected on the observed trajectory, so fresh-key
+  replays of that branch will tend to look less bad than the observed failure (selection effect);
+  the realized column is the one that is exact. `W = 20`, `lookback = 20`, `tail = 50` are
+  placeholders, not tuned.
+- **Still the team's call:** which failures to analyse (the handoff's planted-negligence scenarios,
+  e.g. Restore on an Operational Zone A server in phase 2A with vs without red present, would
+  replace automatic selection with a chosen step and horizon, which `--branch-t/--horizon` already
+  supports), and the lookback, tail and term to use.
+
