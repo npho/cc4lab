@@ -290,8 +290,7 @@ Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
      the raw submitted cost and keep it switchable.
   3. How branch points (which failures, which step) are chosen; ties into the
      ex-ante vs ex-post decision.
-  Also remaining for Milestone 2: coalition-masked `rollout.py` with the
-  `batch_mode` (`vmap` | `map`) switch.
+  (Item 2 now has a switch, below; items 1 and 3 are still open.)
 
 ## First trained policy and reference comparison
 
@@ -331,4 +330,40 @@ Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
   Whether that is acceptable depends on which further rules the team adds (their decision).
   Why the rule has so little effect was not investigated.
 - **Not yet done:** re-measure K with this policy (the spike's K = 64 used random policies).
+
+## Coalition rollouts and the first end-to-end attribution
+
+- **Done: coalition-masked rollouts** (`rollout.make_coalition_returns_fn`, `tests/test_coalitions.py`).
+  `(state, keys (K, 2), masks (C, 5)) -> returns (C, K)`: agent i in a coalition follows the actual
+  policy, the rest the reference; every coalition shares the K keys (CRN) and each agent
+  is evaluated with its own key. Tested: the full/empty coalitions equal plain single-policy
+  rollouts exactly, a mixed coalition equals a hand-composed policy, and Shapley efficiency holds on
+  real rollouts. `batch_mode` is `map` (default, sequential, fast on CPU) or `vmap` (intended for
+  GPU); a `map`/`vmap` agreement test exists but is opt-in (`CC4LAB_SLOW=1`) because vmap compiles
+  for minutes on CPU, and it has not been run.
+- **Busy-tick cost is now a switch, not a decision** (`cost_mode`): `raw` (default; jaxborg's
+  reward as reported, -1 per submitted Restore even when the agent is busy and the env ignores it)
+  or `busy_corrected` (refund those). `Trajectory` gained a `busy` field (agent mid-action before
+  the step) and `ignored_restore_count`; a test checks the refund equals exactly the ignored Restores.
+- **First end-to-end run** (`scripts/attribute_branch.py`): trained policy (final 500k checkpoint),
+  episode seed 0, branched at t = 250, reference = Sleep, K = 4, all 32 coalitions.
+  Shapley efficiency error 1.2e-4. One episode, one branch, K = 4: this shows the pipeline
+  works, not what the numbers mean.
+
+  | agent | Shapley, raw | Shapley, busy_corrected | leave-one-out, raw |
+  |---|---|---|---|
+  | 0 | -413 +/- 45 | -396 +/- 43 | -385 +/- 57 |
+  | 1 | 361 +/- 61 | 376 +/- 60 | 361 +/- 54 |
+  | 2 | 38 +/- 46 | 46 +/- 47 | 51 +/- 49 |
+  | 3 | 1215 +/- 233 | 1230 +/- 234 | 1227 +/- 234 |
+  | 4 | -61 +/- 30 | -42 +/- 30 | -48 +/- 24 |
+
+  v(all actual) = -2703.5 (raw) or -2628.5 (corrected); v(none) = -3843.0.
+- **How much the cost choice matters here:** the corrected values differ by 9 to 19 points per
+  agent (75 points in total, exactly the refund for ignored Restores), against effects of hundreds.
+  It does not change the ranking, and agent 0's negative value persists, so that is not a
+  cost artifact. At the 50-point resolution used for K, though, 15-20 points is not nothing.
+  Evidence from one branch only.
+- Leave-one-out and Shapley agree closely here (no strong redundancy at this branch); the
+  difference between them is within the standard errors.
 

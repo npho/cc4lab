@@ -118,8 +118,18 @@ uv run pytest
 `cc4lab.policies.rulebook.firewall_rulebook` is the reference agent (first rule:
 firewall matches the mission phase's communication policy) and
 `cc4lab.rules.firewall_violations` flags agents that leave a mismatch unaddressed.
-Coalition-masked rollouts are not implemented yet; see `NOTES.md`,
-"Milestone 2 progress".
+`cc4lab.rollout.make_coalition_returns_fn` evaluates all coalitions over shared
+random keys (`batch_mode`: `map` for CPU, `vmap` for GPU; `cost_mode`: `raw` or
+`busy_corrected`, see `NOTES.md`). End to end for one branched episode:
+
+```bash
+uv run python scripts/attribute_branch.py MODEL.safetensors --branch-t 250 --keys 4
+```
+
+It prints Shapley values and the leave-one-out baseline with standard errors and
+checks efficiency; results are written to `results/attribution/` (gitignored).
+`--reference` (`sleep` or `rulebook`) and `--cost-mode` expose the open design choices.
+See `NOTES.md`, "Coalition rollouts and the first end-to-end attribution".
 
 ## Spikes (Milestone 1)
 
