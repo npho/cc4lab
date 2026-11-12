@@ -219,3 +219,24 @@ Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
 - **Change for Milestone 2:** the handoff's "32×K rollouts in one vmap call"
   is right for GPU but ~8× slow on CPU. `rollout.py` should take a
   `batch_mode` (`vmap` | `map`) so each backend can use its fast path.
+
+## Training and checkpoint loading (after the git-source move)
+
+- **Training runs on CPU with jaxborg's own trainer**, launched from cc4lab's
+  environment: `ippo_jax.py` from a scratch clone plus an absolute recipe path
+  (`recipe.py` resolves `recipes/` relative to the package, so name lookup fails
+  under a git install). 12k steps, 8 envs: compile 73.7 s, then 357 and 342
+  steps/s (learner included). Extrapolation, not measured: 500k steps about 25 min,
+  3M about 2.5 h. 48 envs (recipe default) may differ in both compile and speed.
+- **Checkpoints load into cc4lab from the installed package alone**
+  (`policies/loaders.py`: `safetensors` file + `recipe_<tag>.yaml` sidecar). Tested
+  with a unit test (matches a manual `apply` plus per-key `categorical`, respects masks,
+  each agent uses only its own key) and with a real 12k-step checkpoint played
+  for full episodes (`scripts/eval_checkpoint.py`). Shared arch only.
+- The smoke checkpoint is near random-level (mean return -5069 vs -4508
+  random_valid, n=4, noisy), as expected at 12k steps. No claim about trained-policy
+  quality yet.
+- **Sidecar caveat:** `write_sidecar` records `git rev-parse HEAD` of the launch
+  directory, which is cc4lab's commit when training runs from here, not jaxborg's.
+- The loader samples with one key per agent; the trainer uses one key per flattened batch.
+  Same distribution, different random streams.

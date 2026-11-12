@@ -51,16 +51,39 @@ The installed package contains only `src/jaxborg`. Its `recipes/`, `scripts/`
 `recipes/` relative to the package, so recipes cannot be loaded from a git
 install. cc4lab never needs them to run; two cases do:
 
-- **Reading jaxborg code or docs, or training with its recipes as-is.** Use a
-  scratch clone at the pinned commit, outside this repo, and load the resulting
-  checkpoints into cc4lab via `jaxborg.checkpoint` / `jaxborg.policies` (see
-  `policies/loaders.py`; loading a checkpoint trained this way is untested).
-  Record the commit and recipe name next to each checkpoint.
+- **Reading jaxborg code or docs, or training with its recipes as-is.** Keep a
+  scratch clone at the pinned commit, outside this repo:
 
   ```bash
   git clone https://github.com/ITM-Kitware/jaxborg ~/src/jaxborg-ref
   git -C ~/src/jaxborg-ref checkout b85bc324851808708a597b2bba3a84994ffff7d9
   ```
+
+  Train from cc4lab's environment with the clone's trainer script and an
+  **absolute** recipe path (recipes are not found by name from a git install).
+  Verified on CPU (macOS):
+
+  ```bash
+  JAXBORG_EXP_DIR=~/cc4lab-exp uv run python ~/src/jaxborg-ref/scripts/train/algorithms/ippo_jax.py \
+      --recipe ~/src/jaxborg-ref/recipes/default.yaml --total-timesteps 500000 --num-envs 8 --tag default_seed42
+  ```
+
+  This writes `model_<tag>.safetensors` and `recipe_<tag>.yaml` under
+  `$JAXBORG_EXP_DIR/ippo_jax/<tag>/`. Measured on CPU: ~74 s one-time compile,
+  then ~350 steps/s at 8 envs, so 500k steps is roughly 25 min and the
+  recipe's 3M about 2.5 h (48 envs, the recipe default, not measured). The
+  recipe notes say returns plateau by ~500k steps.
+
+  Load and check a checkpoint with `cc4lab.policies.loaders.load_policy`, or
+  play it against the trivial baselines:
+
+  ```bash
+  uv run python scripts/eval_checkpoint.py ~/cc4lab-exp/ippo_jax/default_seed42/model_default_seed42.safetensors
+  ```
+
+  Only the `shared` architecture is supported by the loader. The sidecar's
+  `git_commit` is the commit of the directory the trainer was launched from
+  (not necessarily jaxborg), so record the jaxborg pin yourself next to results.
 
 - **Trying a local change to jaxborg** (jaxborg is read-only upstream; describe
   any change that turns out to be necessary in `NOTES.md`). Layer a local
