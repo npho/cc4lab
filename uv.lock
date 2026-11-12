@@ -497,9 +497,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "jax-cuda12-plugin", extras = ["with-cuda"], marker = "sys_platform == 'linux' and extra == 'cuda'", specifier = "==0.10.0" },
-    { name = "jaxborg", editable = "../jaxborg" },
-    { name = "jaxborg", extras = ["cpu"], marker = "extra == 'cpu'", editable = "../jaxborg" },
-    { name = "jaxborg", extras = ["cuda"], marker = "extra == 'cuda'", editable = "../jaxborg" },
+    { name = "jaxborg", git = "https://github.com/ITM-Kitware/jaxborg?rev=b85bc324851808708a597b2bba3a84994ffff7d9" },
+    { name = "jaxborg", extras = ["cpu"], marker = "extra == 'cpu'", git = "https://github.com/ITM-Kitware/jaxborg?rev=b85bc324851808708a597b2bba3a84994ffff7d9" },
+    { name = "jaxborg", extras = ["cuda"], marker = "extra == 'cuda'", git = "https://github.com/ITM-Kitware/jaxborg?rev=b85bc324851808708a597b2bba3a84994ffff7d9" },
     { name = "numpy" },
 ]
 provides-extras = ["cpu", "cuda"]
@@ -1332,7 +1332,7 @@ wheels = [
 [[package]]
 name = "jaxborg"
 version = "0.1.0"
-source = { editable = "../jaxborg" }
+source = { git = "https://github.com/ITM-Kitware/jaxborg?rev=b85bc324851808708a597b2bba3a84994ffff7d9#b85bc324851808708a597b2bba3a84994ffff7d9" }
 dependencies = [
     { name = "chex" },
     { name = "cyborg" },
@@ -1350,28 +1350,6 @@ cpu = [
 ]
 cuda = [
     { name = "jax" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "chex" },
-    { name = "cyborg", git = "https://github.com/PaulHax/cage-challenge-4.git?rev=69ded9aa40b16ce87f7106fe961f68ad08d47176" },
-    { name = "flax" },
-    { name = "jax", extras = ["cpu"], marker = "extra == 'cpu'", specifier = ">=0.7.1" },
-    { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.7.1" },
-    { name = "jaxmarl", git = "https://github.com/FLAIROx/JaxMARL.git?branch=main" },
-    { name = "mlflow", specifier = ">=3.10.0" },
-    { name = "optax" },
-    { name = "pyyaml" },
-    { name = "torch", specifier = ">=2.0" },
-]
-provides-extras = ["cpu", "cuda"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest-split" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
 ]
 
 [[package]]

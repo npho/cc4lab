@@ -15,8 +15,11 @@ Conventions used throughout cc4lab:
 from __future__ import annotations
 
 import functools
+import importlib.metadata
+import json
 import subprocess
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import jax
 import jax.numpy as jnp
@@ -33,18 +36,38 @@ ACTION_DIM = BLUE_ALLOW_TRAFFIC_END
 EPISODE_LENGTH = MAX_STEPS
 BLUE_AGENTS = tuple(f"blue_{i}" for i in range(N_BLUE))
 
-JAXBORG_DIR = Path(jaxborg.__file__).resolve().parents[2]
+JAXBORG_DIR = Path(jaxborg.__file__).resolve().parent  # the imported package, wherever it is installed
+
+
+def _commit_from_direct_url(info: dict) -> str:
+    """Resolve the jaxborg commit from its PEP 610 ``direct_url.json`` record."""
+    vcs = info.get("vcs_info")
+    if vcs and vcs.get("commit_id"):  # normal case: installed from the pinned git rev
+        return vcs["commit_id"]
+    url = urlparse(info.get("url", ""))
+    if info.get("dir_info") and url.scheme == "file":  # local checkout override (see README)
+        checkout = unquote(url.path)
+        try:
+            sha = subprocess.check_output(["git", "-C", checkout, "rev-parse", "HEAD"], text=True).strip()
+            dirty = subprocess.check_output(["git", "-C", checkout, "status", "--porcelain"], text=True).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return "unknown"
+        return sha + ("+dirty" if dirty else "")
+    return "unknown"
 
 
 @functools.cache
 def jaxborg_commit() -> str:
-    """HEAD of the jaxborg checkout cc4lab is running against (``+dirty`` if modified)."""
+    """Commit of the jaxborg cc4lab is running against.
+
+    Read from the install metadata, so it works for a git install (the default)
+    and for a local path checkout (``+dirty`` if that checkout is modified).
+    """
     try:
-        sha = subprocess.check_output(["git", "-C", str(JAXBORG_DIR), "rev-parse", "HEAD"], text=True).strip()
-        dirty = subprocess.check_output(["git", "-C", str(JAXBORG_DIR), "status", "--porcelain"], text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
+        raw = importlib.metadata.distribution("jaxborg").read_text("direct_url.json")
+        return _commit_from_direct_url(json.loads(raw))
+    except (importlib.metadata.PackageNotFoundError, TypeError, ValueError):
         return "unknown"
-    return sha + ("+dirty" if dirty else "")
 
 
 def describe_backend(print_it: bool = True) -> dict:

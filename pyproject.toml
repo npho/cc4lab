@@ -3,7 +3,7 @@ name = "cc4lab"
 version = "0.1.0"
 description = "Counterfactual responsibility attribution among CAGE Challenge 4 blue agents, built on jaxborg."
 readme = "README.md"
-requires-python = "==3.11.*"  # matches ../jaxborg/.python-version
+requires-python = "==3.11.*"  # matches jaxborg's .python-version
 dependencies = [
     "jaxborg",
     "numpy",
@@ -34,14 +34,16 @@ packages = ["src/cc4lab"]
 
 [tool.uv]
 conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
-# uv applies overrides/constraints only from the root project, and a path
-# dependency contributes its loose specifiers but not its lockfile. Without
+# uv applies overrides/constraints only from the root project, and a
+# dependency (git or path) contributes its loose specifiers but not its
+# lockfile. Without
 # the blocks below, cc4lab resolves different versions than jaxborg tested
 # (seen: jaxmarl main broke FsmRedCC4Env.reset; mujoco-mjx 4 broke import).
 #
 # 1. jaxborg's own [tool.uv] overrides, repeated verbatim (hand-maintained).
-# 2. Generated from ../jaxborg/uv.lock: git URLs as overrides, every other
-#    package pinned via constraints. Regenerate after bumping jaxborg with
+# 2. Generated from jaxborg's uv.lock at the `rev` pinned in [tool.uv.sources]:
+#    git URLs as overrides, every other package pinned via constraints.
+#    After bumping `rev`, regenerate with
 #    `uv run python scripts/pin_jaxborg_lock.py && uv lock`.
 override-dependencies = [
     "matplotlib>=3.9",
@@ -258,7 +260,9 @@ constraint-dependencies = [
 ]
 
 [tool.uv.sources]
-jaxborg = { path = "../jaxborg", editable = true }
+# The full 40-char SHA is the single place the jaxborg pin lives; uv.lock
+# records the resolved commit too. To hack on jaxborg locally, see README.
+jaxborg = { git = "https://github.com/ITM-Kitware/jaxborg", rev = "b85bc324851808708a597b2bba3a84994ffff7d9" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

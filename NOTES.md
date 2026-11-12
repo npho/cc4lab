@@ -1,7 +1,7 @@
 # NOTES
 
 Findings log. Every **[unverified]** claim from `HANDOFF.md` is resolved here.
-jaxborg paths are relative to `../jaxborg` at commit `b85bc32`.
+jaxborg paths are relative to the root of the jaxborg repo at commit `b85bc32`.
 
 ## Milestone 0: scaffold
 
@@ -12,7 +12,8 @@ jaxborg paths are relative to `../jaxborg` at commit `b85bc32`.
   **Confirmed** (`pyproject.toml` `[project.optional-dependencies]`).
 - jaxborg pins Python 3.11.13 (`.python-version`). On 3.14, `ray==2.38.0`
   (via cyborg) has no wheel, so cc4lab pins `==3.11.*` too.
-- **A path dependency does not pass on its lockfile.** A fresh `uv lock` in
+- **A dependency does not pass on its lockfile.** (Found with a path dependency;
+  the same holds for a git dependency.) A fresh `uv lock` in
   cc4lab resolved different versions from jaxborg's `uv.lock`:
   - `jaxmarl` (declared as `branch = "main"`) moved from `63226c5` to `d4b185d`.
     The newer `MultiAgentEnv.__init__` sets `self.agents = ["agent_0", ...]`
@@ -22,11 +23,13 @@ jaxborg paths are relative to `../jaxborg` at commit `b85bc32`.
     (`libmujoco.3.1.3.dylib` not loaded).
   - Also `flax` 0.10.4 → 0.12.8, `optax`, `chex`, `jax` 0.10.0 → 0.10.2.
   - Fix: `scripts/pin_jaxborg_lock.py` copies every locked version from
-    `../jaxborg/uv.lock` into `[tool.uv] constraint-dependencies`. Git URLs
+    jaxborg's `uv.lock` (fetched at the pinned rev) into `[tool.uv] constraint-dependencies`. Git URLs
     go to `override-dependencies`. jaxborg's own overrides are repeated by
     hand, because uv honours overrides only in the root project.
     jaxborg's `[tool.uv.sources]` (cyborg, jaxmarl git) *are* honoured
-    through the path dependency.
+    through the path dependency. After the move to a git source, `uv lock`
+    changed no package versions; the root overrides carry those URLs anyway,
+    so this does not show whether uv still reads jaxborg's own sources.
   - After the fix, `jax 0.10.0`, `flax 0.10.4`, `mujoco-mjx 3.1.3` and the rest
     match jaxborg's lock exactly.
 - **Upstream bug: jaxborg's `cuda` extra installs CPU-only JAX.**
@@ -42,6 +45,13 @@ jaxborg paths are relative to `../jaxborg` at commit `b85bc32`.
   for `cpu`; `cuda` was corrected as above.** It was locked but not run on a
   GPU here.
 - No jaxborg files were modified.
+- **Dependency layout: git source, not a sibling path.** jaxborg is a uv git
+  dependency pinned by `rev` in `pyproject.toml` (previously an editable
+  `../jaxborg` path). Reasons: the pin lives in code and `uv.lock` instead of
+  README prose, and no second clone is needed on a fresh machine or on unagi.
+  Trade-off: only `src/jaxborg` is installed, so jaxborg's `recipes/` and
+  `scripts/` need a separate clone (see README, "Working with jaxborg's
+  source"). Switching to a submodule later is a one-commit change.
 
 ### Interfaces the code depends on
 

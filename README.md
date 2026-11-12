@@ -13,31 +13,71 @@ common random numbers across coalitions.
 |---|---|
 | Upstream | https://github.com/ITM-Kitware/jaxborg |
 | Commit | `b85bc324851808708a597b2bba3a84994ffff7d9` (2026-05-15) |
-| Location | `../jaxborg` (sibling checkout, editable path dependency, read-only) |
+| Installed as | uv git dependency (`[tool.uv.sources]` in `pyproject.toml`), read-only upstream |
 
-`describe_backend()` prints the commit actually in use (with `+dirty` if the
-checkout was modified) at the top of every script.
+The `rev` in `pyproject.toml` is the single source of truth for the pin;
+`uv.lock` records the resolved commit too. `describe_backend()` prints the
+commit actually in use at the top of every script (read from the install
+metadata; `+dirty` if a local checkout override has uncommitted changes).
 
 ## Setup
 
 ```bash
-git clone https://github.com/ITM-Kitware/jaxborg ../jaxborg
-git -C ../jaxborg checkout b85bc324851808708a597b2bba3a84994ffff7d9
-
 uv sync --extra cpu     # macOS / CPU
 uv sync --extra cuda    # NVIDIA Linux (unagi)
 ```
+
+No separate jaxborg clone is needed: uv fetches the pinned commit from GitHub.
 
 Pick exactly one extra; plain `uv sync` can silently fall back to CPU on a GPU
 host. Python is pinned to 3.11 to match jaxborg.
 
 `pyproject.toml` pins every package to the version in jaxborg's own
-`uv.lock`, because a path dependency does not pass its lockfile on and a
-fresh resolve drifts (see `NOTES.md`). After bumping the jaxborg commit:
+`uv.lock`, because a dependency does not pass its lockfile on and a fresh
+resolve drifts (see `NOTES.md`). To bump jaxborg, change `rev` in
+`[tool.uv.sources]` to the new full SHA, then regenerate the pins (needs
+network; the script fetches jaxborg's `uv.lock` at that rev):
 
 ```bash
 uv run python scripts/pin_jaxborg_lock.py && uv lock
 ```
+
+Also update the commit and date in the table above.
+
+## Working with jaxborg's source
+
+The installed package contains only `src/jaxborg`. Its `recipes/`, `scripts/`
+(training, eval) and docs are not installed, and `jaxborg.recipe` looks for
+`recipes/` relative to the package, so recipes cannot be loaded from a git
+install. cc4lab never needs them to run; two cases do:
+
+- **Reading jaxborg code or docs, or training with its recipes as-is.** Use a
+  scratch clone at the pinned commit, outside this repo, and load the resulting
+  checkpoints into cc4lab via `jaxborg.checkpoint` / `jaxborg.policies` (see
+  `policies/loaders.py`; loading a checkpoint trained this way is untested).
+  Record the commit and recipe name next to each checkpoint.
+
+  ```bash
+  git clone https://github.com/ITM-Kitware/jaxborg ~/src/jaxborg-ref
+  git -C ~/src/jaxborg-ref checkout b85bc324851808708a597b2bba3a84994ffff7d9
+  ```
+
+- **Trying a local change to jaxborg** (jaxborg is read-only upstream; describe
+  any change that turns out to be necessary in `NOTES.md`). Layer a local
+  checkout over the pinned install without touching `pyproject.toml` or
+  `uv.lock`:
+
+  ```bash
+  uv run --with-editable ../jaxborg python scripts/spike/branching.py
+  ```
+
+  `describe_backend()` then reports that checkout's HEAD, with `+dirty` if it
+  has uncommitted changes.
+
+If cc4lab ends up leaning on jaxborg's repo tree, moving to a git submodule
+(`git submodule add` at the pinned SHA, `path = "./jaxborg"` in
+`[tool.uv.sources]`, point `scripts/pin_jaxborg_lock.py` at the submodule, and
+restore the `git -C` commit lookup in `describe_backend()`) is a one-commit change.
 
 ## Spikes (Milestone 1)
 
