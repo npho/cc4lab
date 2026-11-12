@@ -71,9 +71,13 @@ install. cc4lab never needs them to run; two cases do:
   This writes `model_<tag>.safetensors` and `recipe_<tag>.yaml` under
   `$JAXBORG_EXP_DIR/ippo_jax/<tag>/`. MLflow also drops run artifacts in
   `./mlruns` of the launch directory (gitignored here), regardless of `JAXBORG_EXP_DIR`. Measured on CPU: ~74 s one-time compile,
-  then ~350 steps/s at 8 envs, so 500k steps is roughly 25 min and the
-  recipe's 3M about 2.5 h (48 envs, the recipe default, not measured). The
-  recipe notes say returns plateau by ~500k steps.
+  then ~350 steps/s at 8 envs in a short run. The full 500k-step run above took
+  2326 s (~39 min, ~215 steps/s average, slowed by concurrent test runs), so
+  budget 25-40 min; the recipe's 3M is about 2.5 h by extrapolation (48 envs, the
+  recipe default, not measured). The recipe notes say returns plateau by ~500k
+  steps; in our one seed they fluctuate between checkpoints, so use the final
+  one (results and caveats in `NOTES.md`, "First trained policy and reference
+  comparison").
 
   Load and check a checkpoint with `cc4lab.policies.loaders.load_policy`, or
   play it (several checkpoints at once are fine) against the baselines (random, sleep, firewall rulebook):
@@ -127,10 +131,11 @@ Coalition-masked rollouts are not implemented yet; see `NOTES.md`,
 uv run python scripts/spike/benchmark.py      # throughput vs batch size
 uv run python scripts/spike/branching.py      # branch determinism + action timers
 uv run python scripts/spike/variance.py       # seed count K, CRN vs independent
+uv run python scripts/spike/variance_trained.py MODEL.safetensors  # re-measure K per agent with a trained policy
 uv run python scripts/spike/reward_check.py   # team vs per-agent reward, per-zone terms
 ```
 
-Each writes to `results/spike/` (gitignored). Findings are logged in `NOTES.md`.
+Each writes to `results/spike/` (gitignored); `variance_trained.py` needs a checkpoint (see above). Findings are logged in `NOTES.md`.
 
 ## GPU runs on unagi
 
