@@ -413,3 +413,35 @@ Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
   replace automatic selection with a chosen step and horizon, which `--branch-t/--horizon` already
   supports), and the lookback, tail and term to use.
 
+## K re-measured with the trained policy
+
+`scripts/spike/variance_trained.py` (final 500k checkpoint, reference Sleep, branch at t = 250 so the
+horizon is 250 steps, 4 bases = distinct topologies and prefixes, 128 keys per coalition per base, 100
+episodes for the per-episode spread). Raw output is in `~/cc4lab-exp/results/variance_trained.json`
+(outside the repo). The criterion is the spike's: 2 * sigma_D / sqrt(K) <= 50 points.
+
+- **Per-episode return spread** (trained policy): sigma 700 over independent topologies (mean -2356),
+  544 on one fixed topology (mean -2180). Spike with random policies: 966 and 630.
+- **sigma_D under CRN, per agent** (pooled over the 4 bases), and the K it implies:
+
+  | agent | 0 | 1 | 2 | 3 | 4 |
+  |---|---|---|---|---|---|
+  | sigma_D | 200 | 192 | 149 | 281 | 123 |
+  | K | 64 | 59 | 36 | 127 | 25 |
+
+  **Recommended K = 127 with CRN** (set by agent 3, the agent whose swap matters most), and 274 for the
+  worst single base (agent 3, sigma 413). The spike's K = 64 used random policies and agent 0 only;
+  agent 0 alone still gives 64 here, but other agents are noisier.
+- **CRN helps less than in the spike:** for agent 0, independent keys give sigma 445 vs 200 with CRN, a
+  variance reduction of 5.0x (spike: 7.2x). Without CRN the required K would be about 5x larger.
+- **Cost:** one branch point is 32 coalitions x K x horizon steps. At K = 127 and 250 steps that is
+  about 1.0M steps (roughly half an hour on one CPU core at the ~600 steps/s measured in the spike, not
+  re-timed with the trained policy). With the ~90-step horizons that window branching uses (below), it
+  should be about a third of that. How sigma_D scales with horizon is **not measured**.
+- **Observation, one policy and four bases:** the mean difference D (all actual minus agent i swapped to
+  Sleep) is consistently negative for agents 0 (-285, -200, +5, -333) and 4 (-156, -98, -105, -160),
+  and large and positive for agent 3 (+109 to +909). So at these states the trained agents 0 and 4 do worse
+  than sleeping, in line with the first attribution run. Possible reasons are the single 500k-step seed, a
+  weak policy for those agents, or Sleep being an odd reference; busy-tick cost does not explain it (it moved
+  values only 9-19 points). Not investigated.
+
