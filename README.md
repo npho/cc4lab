@@ -103,6 +103,21 @@ If cc4lab ends up leaning on jaxborg's repo tree, moving to a git submodule
 `[tool.uv.sources]`, point `scripts/pin_jaxborg_lock.py` at the submodule, and
 restore the `git -C` commit lookup in `describe_backend()`) is a one-commit change.
 
+## Attribution (Milestone 2, in progress)
+
+`cc4lab.attribution` computes exact Shapley values (`shapley_values`) and the
+leave-one-out baseline (`loo_values`) from the 32 coalition values. Coalition
+`c` contains agent `i` iff bit `i` of `c` is set (index 0 = all reference
+policy, 31 = all actual); `coalition_masks()` gives the masks in that order.
+Run the tests (no GPU needed) with:
+
+```bash
+uv run pytest
+```
+
+Coalition-masked rollouts, the rulebook agent and rule-violation flags are not
+implemented yet; see `NOTES.md`, "Milestone 2 progress".
+
 ## Spikes (Milestone 1)
 
 ```bash

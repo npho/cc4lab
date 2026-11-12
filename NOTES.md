@@ -240,3 +240,28 @@ Cost at K = 64: one branch point is 32 coalitions × 64 × 250 steps =
   directory, which is cc4lab's commit when training runs from here, not jaxborg's.
 - The loader samples with one key per agent; the trainer uses one key per flattened batch.
   Same distribution, different random streams.
+
+## Milestone 2 progress
+
+- **Done: exact Shapley and leave-one-out** (`attribution/shapley.py`, `attribution/loo.py`),
+  tested without any simulator (`tests/test_attribution.py`, 14 tests). Shapley is
+  checked against closed forms (two-player asymmetric, additive, symmetric,
+  3-player majority), the null-player and efficiency axioms, and an independent
+  brute force over all 120 player orderings. Both take `values` of shape
+  `(32, *batch)` and return `(5, *batch)`; they are jit-friendly.
+- **Coalition index convention** (documented in `attribution/__init__.py`; the rollout
+  code must use it): coalition `c` contains agent `i` iff bit `i` of `c` is set, so index 0 is
+  the empty coalition (all reference) and 31 is the full coalition (all actual).
+  `coalition_masks()` returns the `(32, 5)` bool masks in index order.
+- Leave-one-out misses redundancy: if any 2 of 3 agents suffice, every agent
+  scores 0, while Shapley gives each 1/3 (tested).
+- **Not started, deferred by Nam (2026-11-11):**
+  1. Train a real blue policy (500k steps, ~25 min on this CPU) and re-measure K.
+  2. Busy-tick action-cost semantics for coalition masking (see "Milestone 2 caveat
+     on busy agents" above). Decide before `rollout.py`; proposed default is to count
+     the raw submitted cost and keep it switchable.
+  3. How branch points (which failures, which step) are chosen; ties into the
+     ex-ante vs ex-post decision.
+  Also remaining for Milestone 2: coalition-masked `rollout.py` with the
+  `batch_mode` (`vmap` | `map`) switch, `rulebook.py`, `rules.py`.
+
