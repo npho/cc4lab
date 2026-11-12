@@ -69,7 +69,8 @@ install. cc4lab never needs them to run; two cases do:
   ```
 
   This writes `model_<tag>.safetensors` and `recipe_<tag>.yaml` under
-  `$JAXBORG_EXP_DIR/ippo_jax/<tag>/`. Measured on CPU: ~74 s one-time compile,
+  `$JAXBORG_EXP_DIR/ippo_jax/<tag>/`. MLflow also drops run artifacts in
+  `./mlruns` of the launch directory (gitignored here), regardless of `JAXBORG_EXP_DIR`. Measured on CPU: ~74 s one-time compile,
   then ~350 steps/s at 8 envs, so 500k steps is roughly 25 min and the
   recipe's 3M about 2.5 h (48 envs, the recipe default, not measured). The
   recipe notes say returns plateau by ~500k steps.
