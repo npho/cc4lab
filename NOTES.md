@@ -599,3 +599,13 @@ dropped, §12 there). Code: `policies/rulebook.py` (`RulebookConfig`, `make_rule
   observable sense. Omission of R1 is common for every agent but cheap (fixing mismatches is worth about
   nothing, L1 = L0); commission is rare but costly (item 1). Trained agents also Restore unflagged hosts
   3.6-6.1 times per 100 steps, consistent with their near-uniform action mix.
+- **The reference in the paper's terms** (RULEBOOK.md §10). Agents outside a coalition follow a scripted
+  rulebook *informed by*, not compliant with, NIST SP 800-61 Rev. 3 (the CSF 2.0 incident-response
+  profile). Each agent, every step, from its own observation: (R1, PR.IR-01) if the firewall of a subnet it
+  observes disagrees with the mission phase's communication policy, fix one disagreement; otherwise (R2,
+  RS.MI-02) if a host it can act on shows a detected malicious process, Remove one such host chosen at
+  random; otherwise do nothing (Sleep). Detection (DE.CM-01/09) needs no action because the simulator
+  monitors every step; analysis (RS.AN) has no observable effect in jaxborg and is omitted; containment
+  (RS.MI-01) is omitted because every containment Block contradicts the communication policy, which we
+  measured to be costly. A recovery variant (RC.RP-02: Restore instead of Remove with probability 0.25) is
+  the stronger sensitivity reference, and firewall-only is the weaker one.

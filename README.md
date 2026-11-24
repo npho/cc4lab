@@ -119,9 +119,17 @@ Run the tests (no GPU needed) with:
 uv run pytest
 ```
 
-`cc4lab.policies.rulebook.firewall_rulebook` is the reference agent (first rule:
-firewall matches the mission phase's communication policy) and
-`cc4lab.rules.firewall_violations` flags agents that leave a mismatch unaddressed.
+The reference agent is the NIST-informed rulebook specified in `RULEBOOK.md`:
+`cc4lab.policies.rulebook.make_rulebook(RulebookConfig(...))`, with the evaluated
+ladder in `RUNGS` (primary reference **L2** = firewall + Remove flagged hosts; L1
+and L5 for sensitivity). `cc4lab.rules.rule_violations` flags rule breaches per
+agent and step (omission and commission of the firewall rule, unaddressed
+incidents, unjustified Restores). Ladder and violation rates:
+
+```bash
+uv run python scripts/reference_ladder.py --seed-start 0 --episodes 32
+uv run python scripts/violation_rates.py MODEL.safetensors --rungs L1 L2
+```
 `cc4lab.rollout.make_coalition_returns_fn` evaluates all coalitions over shared
 random keys (`batch_mode`: `map` for CPU, `vmap` for GPU; `cost_mode`: `raw` or
 `busy_corrected`, see `NOTES.md`). End to end for one branched episode:
@@ -136,7 +144,8 @@ Key 0 is the observed episode's own key, so the output has both the realized
 (that failure) and the expected (over fresh randomness) attribution. It prints
 Shapley values and the leave-one-out baseline with standard errors and checks
 efficiency; results are written to `results/attribution/` (gitignored).
-`--reference` (`sleep` or `rulebook`) and `--cost-mode` expose the open design choices.
+`--reference` (`sleep`, `rulebook`, or a rung such as `L2`; `L5` requires
+`--cost-mode busy_corrected`) and `--cost-mode` expose the design choices.
 See `NOTES.md`, "Coalition rollouts and the first end-to-end attribution".
 
 ## Spikes (Milestone 1)

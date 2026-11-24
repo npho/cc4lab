@@ -1,6 +1,6 @@
 # RULEBOOK: specification of the reference policy
 
-Status: **specification, being implemented** (branch `rulebook-impl`). Written 2026-11-23 for a
+Status: **implemented and evaluated** (branch `rulebook-impl`; primary reference L2, see §12). Written 2026-11-23 for a
 contributor who has not seen the design discussion. Everything here was checked against jaxborg
 `b85bc32` (the pinned commit) by reading its source. The original **[verify]** items are resolved;
 §12 records the decisions taken after the first draft and the evidence behind them.
@@ -296,3 +296,7 @@ Evidence: `NOTES.md`, "Why agent 4 loses to Sleep: policy-violating Blocks" (bra
   the trained agents answers the same question (is a NIST-justifiable action blamed?) without a new rule.
   L4 and test 3 are dropped. If time remains, R3 can be added back as a documented-negative rung.
 - **Attribution budget:** 8 branches per reference (§6.3).
+- **Ladder run (2026-11-23; `NOTES.md`, "NIST-informed reference ladder").** Idle = Sleep: explicit
+  Monitor has no effect in jaxborg (identical trajectories; only `blue_pending_action` differs). Primary
+  reference = L2 (+2942 +/- 197 over L1 on the evaluation seeds). L1 and L5 are the sensitivity references.
+  L2 does not beat the trained policies (rule 4 not triggered).
