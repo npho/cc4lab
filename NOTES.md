@@ -507,3 +507,44 @@ in `~/cc4lab-exp/results/` (outside the repo).
 - **Not investigated:** the cause of agent 4's ASF harm; whether the recipe's full 3M steps (about 8 h per
   run at this speed, with 48 envs) would change the picture. These policies used a sixth of that budget.
 
+
+## Why agent 4 loses to Sleep: policy-violating Blocks
+
+Two scripts, same branch states and shared keys as `swap_decomposition.py` (branch at t = 250, 3 bases x 16
+keys, all four seeds). Raw output: `~/cc4lab-exp/results/action_type_swap.{log,json}` and
+`block_compliance.{log,json}`. Check: the "everything -> Sleep" row reproduces `swap_decomposition`'s D exactly
+in every seed (-116 / -180 / -353 / -230), and "all Blocks -> Sleep" is identical in both scripts.
+
+- **By action type** (`scripts/action_type_swap.py`; D = V(actual) - V(variant), +/- SE of total):
+
+  | seed | everything -> Sleep | remove Block | only Block | remove Allow | remove Restore | remove Analyse / Remove / Decoy |
+  |---|---|---|---|---|---|---|
+  | 42 | -116 +/- 18 | -124 +/- 17 | -332 | +52 | +15 | +20 / +9 / +26 |
+  | 43 | -180 +/- 15 | -173 +/- 15 | -316 | +38 | +16 | +7 / +16 / -6 |
+  | 44 | -353 +/- 28 | -349 +/- 27 | -560 | +53 | +42 | +27 / +9 / +4 |
+  | 45 | -230 +/- 25 | -224 +/- 26 | -440 | +19 | +22 | +25 / +3 / +23 |
+
+  ("only X": agent 4 keeps only its X actions, Sleep otherwise, compared with always Sleep.) Blocks account for
+  all of agent 4's net harm, almost entirely through ASF. Its Allows partly undo it (Blocks alone cost 316-560).
+  Restore is about neutral (-27 to -33 action cost, +33 to +62 ASF). Analyse, Remove and Decoy are small positives.
+  The seed with the most harm (44) is the one that Blocks most (18.9 per 100 steps vs 10.5-11.3); the
+  Restore-share correlation suggested above was the wrong lead. The ASF harm lands on other zones too
+  (e.g. Restricted Zones A/B), not only agent 4's own. Effects are not additive (the "remove" rows do not sum
+  to the total; Block and Allow interact). Removing Blocks frees agent 4's time but its other action rates barely
+  change (it sleeps instead), so the busy-time confound is small here.
+- **By policy compliance** (`scripts/block_compliance.py`, `cc4lab.rules.traffic_action_kind`): a Block is
+  *violating* if the phase's communication policy says the link should stay open, *compliant* if it says
+  blocked, *redundant* if the link is already blocked.
+
+  | seed | violating Blocks -> Sleep | all Blocks -> Sleep | compliant Blocks -> Sleep | agent 4 violating Blocks / 100 steps (other agents) |
+  |---|---|---|---|---|
+  | 42 | -124 +/- 17 | -124 | -9 +/- 13 | 2.1 (0.0-0.9) |
+  | 43 | -174 +/- 15 | -173 | -51 +/- 16 | 2.0 (0.0-0.8) |
+  | 44 | -348 +/- 27 | -349 | +4 +/- 15 | 2.0 (0.0-0.4) |
+  | 45 | -223 +/- 26 | -224 | +100 +/- 25 | 1.4 (0.1-0.4) |
+
+  **Agent 4's harm is entirely its policy-violating Blocks** (about 2 per 100 steps, more than any other agent
+  in every seed). Redundant Blocks change nothing (exactly 0, as expected). Compliant Blocks are mixed (-51 to
+  +100). So *violating* the communication policy is costly while *enforcing* it is worth about nothing, which
+  is consistent with the firewall-only rulebook scoring the same as Sleep. Counts are over 8 full episodes.
+- **Caveats:** one branch time (t = 250), 3 bases, 16 keys; the SEs cover key sampling only.
