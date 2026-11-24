@@ -181,3 +181,90 @@ def test_rung_inside_coalition_rollouts_keeps_efficiency_and_endpoints(world):
         assert v[0, j] == float(R.rollout(env, ref, state, keys[j], n)[1].rewards.sum())
     phi = np.asarray(shapley_values(jnp.asarray(v)))
     np.testing.assert_allclose(phi.sum(axis=0), v[-1] - v[0], atol=1e-3)
+
+
+# --- violation flags (RULEBOOK.md §7) -------------------------------------------------------------
+
+
+def traffic_link(state, agent, policy_blocked: bool, now_blocked: bool, slot_index=None):
+    """(r, dst, src) of an observed link of ``agent`` with the given policy and firewall bits, or None."""
+    const, phase = state.const, int(state.state.mission_phase)
+    policy, blocked = np.asarray(const.comms_policy[phase]), np.asarray(state.state.blocked_zones)
+    for r, d in enumerate(np.asarray(const.blue_obs_subnets[agent])):
+        if d < 0 or (slot_index is not None and r != slot_index):
+            continue
+        for s in range(NUM_SUBNETS):
+            if s != d and policy[d, s] == policy_blocked and blocked[d, s] == now_blocked:
+                return r, int(d), s
+    return None
+
+
+def flags_for(obs, masks, agent, obs_a, action, busy=False):
+    from cc4lab.rules import rule_violations
+
+    o = obs.at[agent].set(obs_a)
+    acts = jnp.full(E.N_BLUE, BLUE_SLEEP, jnp.int32).at[agent].set(action)
+    b = jnp.zeros(E.N_BLUE, bool).at[agent].set(busy)
+    out = rule_violations(o, acts, masks, busy=b)
+    return {k: bool(v[agent]) for k, v in out.items()}
+
+
+def test_firewall_violating_is_commission_against_the_policy(world):
+    env, state, obs, masks = world
+    agent = 4
+    viol = traffic_link(state, agent, policy_blocked=False, now_blocked=False)
+    comp = traffic_link(state, agent, policy_blocked=True, now_blocked=False)
+    redund = traffic_link(state, agent, policy_blocked=False, now_blocked=True)
+    assert viol is not None and comp is not None
+    o = with_flags(obs[agent], [])
+
+    def block(link):
+        return encode_blue_action("BlockTrafficZone", -1, agent, const=state.const, src_subnet=link[2], dst_subnet=link[1])
+
+    assert flags_for(obs, masks, agent, o, block(viol))["firewall_violating"]
+    assert not flags_for(obs, masks, agent, o, block(viol), busy=True)["firewall_violating"]
+    assert not flags_for(obs, masks, agent, o, block(comp))["firewall_violating"]
+    if redund is not None:
+        assert not flags_for(obs, masks, agent, o, block(redund))["firewall_violating"]
+    assert not flags_for(obs, masks, agent, o, BLUE_SLEEP)["firewall_violating"]
+    # Allow on a link the policy keeps blocked, while it is blocked, is commission too
+    allow_viol = traffic_link(state, agent, policy_blocked=True, now_blocked=True)
+    if allow_viol is not None:
+        a = encode_blue_action("AllowTrafficZone", -1, agent, const=state.const, src_subnet=allow_viol[2], dst_subnet=allow_viol[1])
+        assert flags_for(obs, masks, agent, o, a)["firewall_violating"]
+
+
+def test_contain_justified_needs_a_flag_in_the_destination_subnet(world):
+    env, state, obs, masks = world
+    agent = 4  # observes three subnets, so "flag elsewhere" is testable
+    viol = traffic_link(state, agent, policy_blocked=False, now_blocked=False)
+    r = viol[0]
+    act = encode_blue_action("BlockTrafficZone", -1, agent, const=state.const, src_subnet=viol[2], dst_subnet=viol[1])
+    here = [s for s, _ in valid_host_slots(state, masks, agent) if s // H == r][0]
+    elsewhere = [s for s, _ in valid_host_slots(state, masks, agent) if s // H != r][0]
+    assert flags_for(obs, masks, agent, with_flags(obs[agent], [here]), act)["contain_justified"]
+    assert not flags_for(obs, masks, agent, with_flags(obs[agent], [elsewhere]), act)["contain_justified"]
+    assert not flags_for(obs, masks, agent, with_flags(obs[agent], []), act)["contain_justified"]
+
+
+def test_incident_unaddressed_and_restore_unjustified(world):
+    env, state, obs, masks = world
+    agent = 2
+    (slot, host), (other, other_host) = valid_host_slots(state, masks, agent)[:2]
+    flagged = with_flags(obs[agent], [slot])
+    remove = encode_blue_action("Remove", host, agent, const=state.const)
+    restore = encode_blue_action("Restore", host, agent, const=state.const)
+    restore_other = encode_blue_action("Restore", other_host, agent, const=state.const)
+    remove_other = encode_blue_action("Remove", other_host, agent, const=state.const)
+
+    assert flags_for(obs, masks, agent, flagged, BLUE_SLEEP)["incident_unaddressed"]
+    assert not flags_for(obs, masks, agent, flagged, BLUE_SLEEP, busy=True)["incident_unaddressed"]
+    assert not flags_for(obs, masks, agent, flagged, remove)["incident_unaddressed"]
+    assert not flags_for(obs, masks, agent, flagged, restore)["incident_unaddressed"]
+    assert flags_for(obs, masks, agent, flagged, remove_other)["incident_unaddressed"]  # wrong host
+    assert not flags_for(obs, masks, agent, with_flags(obs[agent], []), BLUE_SLEEP)["incident_unaddressed"]
+
+    assert flags_for(obs, masks, agent, flagged, restore_other)["restore_unjustified"]
+    assert not flags_for(obs, masks, agent, flagged, restore)["restore_unjustified"]
+    assert not flags_for(obs, masks, agent, flagged, restore_other, busy=True)["restore_unjustified"]
+    assert not flags_for(obs, masks, agent, flagged, remove_other)["restore_unjustified"]

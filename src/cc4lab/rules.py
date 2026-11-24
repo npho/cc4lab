@@ -1,9 +1,9 @@
 """Per-step rule-violation flags computed from observations and chosen actions.
 
-One rule so far, matching ``policies/rulebook.py``: the firewall matches the
-mission phase's communication policy for every subnet the agent observes.
-
-Two flags per agent per step:
+``rule_violations`` returns every flag of the NIST-informed rulebook
+(RULEBOOK.md §7): commission and omission of R1 (firewall), omission of R2
+(incident response), unjustified Restores, and NIST-justifiable containment
+Blocks. ``firewall_violations`` is the original R1 pair:
 
 * ``firewall_mismatch``: the observation shows at least one observed-subnet
   firewall entry that disagrees with the policy (a *state*, not blame).
@@ -15,8 +15,8 @@ Two flags per agent per step:
 Fixing any one mismatch counts as addressing it: the agent can only do one
 thing per step, so this does not demand the rulebook's particular order.
 ``traffic_action_kind`` classifies a single Block/Allow action against the
-same policy (compliant, violating or redundant), for diagnosing what a trained
-agent's traffic actions do; it is not yet a rulebook rule.
+same policy (compliant, violating or redundant); ``rule_violations`` builds the
+commission flag from it.
 
 All functions are jit/vmap friendly.
 """
@@ -30,10 +30,15 @@ from jaxborg.actions.action_defs import (
     BLUE_ALLOW_TRAFFIC_START,
     BLUE_BLOCK_TRAFFIC_END,
     BLUE_BLOCK_TRAFFIC_START,
+    BLUE_REMOVE_END,
+    BLUE_REMOVE_START,
+    BLUE_RESTORE_END,
+    BLUE_RESTORE_START,
 )
+from jaxborg.constants import BLUE_MAX_OBSERVED_SUBNETS, OBS_VECTOR_HOSTS_PER_SUBNET
 
 from cc4lab.env import ACTION_DIM
-from cc4lab.policies.rulebook import firewall_candidates, firewall_cells
+from cc4lab.policies.rulebook import firewall_candidates, firewall_cells, host_flags
 
 TRAFFIC_KINDS = ("compliant", "violating", "redundant")
 """Kinds returned by ``traffic_action_kind`` (by index)."""
@@ -83,3 +88,50 @@ def traffic_action_kind(obs: jax.Array, action: jax.Array) -> tuple[jax.Array, j
     allow_kind = jnp.where(~now_blocked, 2, jnp.where(should_block, 1, 0))
     kind = jnp.where(hit & is_block, block_kind, jnp.where(hit & is_allow, allow_kind, -1))
     return is_block, is_allow, kind
+
+
+def rule_violations(obs: jax.Array, actions: jax.Array, masks: jax.Array | None = None, busy: jax.Array | None = None):
+    """All per-agent flags of the NIST-informed rulebook (RULEBOOK.md §7) -> dict of ``(N_BLUE,)`` bool arrays.
+
+    Includes ``firewall_violations``' two flags plus:
+
+    * ``firewall_violating`` (commission half of R1): the action is a Block or Allow that
+      ``traffic_action_kind`` calls *violating*, i.e. it creates a disagreement with the phase's policy.
+    * ``contain_justified``: a ``firewall_violating`` Block whose destination subnet shows at least one
+      flagged host, i.e. one that NIST's "contain" step (RS.MI-01) could justify.
+    * ``incident_unaddressed`` (omission of R2): some host the agent may Remove is flagged, and the
+      action is not a Remove or Restore on a flagged host.
+    * ``restore_unjustified``: a Restore on a host whose flag is not set.
+
+    Busy agents (``busy``, from ``blue_pending_ticks > 0``) are exempt from every flag except
+    ``firewall_mismatch``: the env ignores what they submit. ``masks`` defaults to all-legal.
+    """
+    if masks is None:
+        masks = jnp.ones((obs.shape[0], ACTION_DIM), dtype=bool)
+    base = firewall_violations(obs, actions, masks, busy)
+    n_slots = BLUE_MAX_OBSERVED_SUBNETS * OBS_VECTOR_HOSTS_PER_SUBNET
+
+    def per_agent(o, m, a):
+        is_block, is_allow, kind = traffic_action_kind(o, a)
+        violating = (is_block | is_allow) & (kind == TRAFFIC_KINDS.index("violating"))
+        flags = host_flags(o)
+        index, real, _, _ = firewall_cells(o)
+        cell = real & (index == a - BLUE_BLOCK_TRAFFIC_START)
+        dst_slot_flagged = (cell.any(axis=1) & flags.reshape(BLUE_MAX_OBSERVED_SUBNETS, -1).any(axis=1)).any()
+        contain = violating & is_block & dst_slot_flagged
+
+        slots = jnp.arange(n_slots)
+        actionable = flags & m[BLUE_REMOVE_START + slots]
+        is_remove = (a >= BLUE_REMOVE_START) & (a < BLUE_REMOVE_END)
+        is_restore = (a >= BLUE_RESTORE_START) & (a < BLUE_RESTORE_END)
+        target = jnp.where(is_remove, a - BLUE_REMOVE_START, a - BLUE_RESTORE_START)
+        target_flagged = flags[jnp.clip(target, 0, n_slots - 1)]
+        responds = (is_remove | is_restore) & target_flagged
+        return violating, contain, actionable.any() & ~responds, is_restore & ~target_flagged
+
+    violating, contain, unaddressed, unjustified = jax.vmap(per_agent)(obs, masks, actions)
+    out = {"firewall_violating": violating, "contain_justified": contain,
+           "incident_unaddressed": unaddressed, "restore_unjustified": unjustified}
+    if busy is not None:
+        out = {k: v & ~busy for k, v in out.items()}
+    return {**base, **out}
