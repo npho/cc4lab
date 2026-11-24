@@ -86,6 +86,17 @@ install. cc4lab never needs them to run; two cases do:
   per agent) and `scripts/swap_decomposition.py` (an agent's marginal contribution split into LWF, ASF,
   RIA and Restore cost).
 
+  To watch an episode, `scripts/visualize_run.py` replays one with a run's model and writes a
+  self-contained HTML player (network map, blue/red actions, reward and compromise timelines,
+  policy-violating Block/Allow highlighted) to `<run>/viz/episode_<policy>_seed<N>.html`. Training
+  runs store no episodes, so it re-plays them; `--seed N` is the same episode the eval scripts score
+  as episode N. `--policy rulebook|random|sleep` replays a baseline on the same topology instead.
+  Deep-link a step with `#t=250`.
+
+  ```bash
+  uv run python scripts/visualize_run.py ~/cc4lab-exp/s43 --seed 0 --seed 1
+  ```
+
   Only the `shared` architecture is supported by the loader. The sidecar's
   `git_commit` is the commit of the directory the trainer was launched from
   (not necessarily jaxborg), so record the jaxborg pin yourself next to results.

@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cc4lab episode</title>
+<!-- Template for scripts/visualize_run.py: the script replaces the DATA placeholder below with the episode JSON. -->
+<style>
+  :root {
+    --bg: #0f1216; --panel: #161b21; --line: #262e37; --text: #d7dde4; --muted: #7d8894;
+    --clean: #3a4552; --user: #e8a33d; --priv: #e5484d; --session: #ff6b6b; --decoy: #4aa8ff;
+    --detect: #7ee0ff; --impact: #b46cff; --blue: #4a8cff; --bad: #ff4fd8; --ok: #3ccf91;
+    --t-sleep: #4b5563; --t-monitor: #8b95a5; --t-analyse: #3ec6e0; --t-remove: #3ccf91;
+    --t-restore: #a78bfa; --t-decoy: #4aa8ff; --t-block: #ff9d3d; --t-allow: #c6e85a;
+    --fade: 220ms;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; padding: 12px 16px 8px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .stats { display: flex; gap: 18px; flex-wrap: wrap; margin-left: auto; }
+  .stat b { display: block; font-size: 17px; font-weight: 600; }
+  .stat span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  #map-wrap { position: relative; padding: 8px; }
+  svg#map { width: 100%; height: auto; display: block; }
+  aside { border-left: 1px solid var(--line); padding: 10px 14px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 3px 4px; vertical-align: top; border-bottom: 1px solid var(--line); }
+  .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+  .tag { font-size: 10px; padding: 0 5px; border-radius: 8px; border: 1px solid currentColor; margin-left: 4px; white-space: nowrap; }
+  .tag.violating { color: var(--bad); } .tag.compliant { color: var(--ok); } .tag.redundant { color: var(--muted); } .tag.busy { color: var(--muted); }
+  #log { max-height: 260px; overflow: auto; font-size: 12px; }
+  #log div { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #log .s { color: var(--muted); display: inline-block; width: 34px; }
+  #log .red { color: var(--session); } #log .blue { color: var(--blue); } #log .bad { color: var(--bad); } #log .good { color: var(--ok); }
+  #log .now { background: #1d2530; }
+  .controls { display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  button, select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  #scrub { flex: 1; min-width: 160px; accent-color: var(--blue); }
+  #timeline-wrap { padding: 0 16px 12px; }
+  canvas#timeline { width: 100%; height: 190px; display: block; cursor: crosshair; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 16px 14px; color: var(--muted); font-size: 12px; }
+  #tip { position: fixed; pointer-events: none; background: #0b0e11ee; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; display: none; z-index: 5; max-width: 320px; }
+  .kbd { color: var(--muted); font-size: 11px; }
+
+  /* map */
+  .cluster { fill: #141a20; stroke: var(--line); stroke-width: 1.5; }
+  .cluster-label { fill: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .03em; text-anchor: middle; }
+  .edge { stroke: #344050; stroke-width: 2; }
+  .edge.inet { stroke: #232b35; stroke-width: 1; stroke-dasharray: 2 4; }
+  .block-bar { stroke: var(--t-block); stroke-width: 5; stroke-linecap: round; }
+  .block-line { stroke: var(--t-block); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .7; fill: none; }
+  .host .shape { stroke: #0f1216; stroke-width: 1.5; transition: fill var(--fade); }
+  .host[data-c="0"] .shape { fill: var(--clean); }
+  .host[data-c="1"] .shape { fill: var(--user); }
+  .host[data-c="2"] .shape { fill: var(--priv); }
+  .host .ring { fill: none; stroke: var(--session); stroke-width: 2; opacity: 0; transition: opacity var(--fade); }
+  .host[data-s="1"] .ring { opacity: 1; }
+  .host .decoy { fill: var(--decoy); opacity: 0; }
+  .host[data-d="1"] .decoy { opacity: 1; }
+  .host .detect { fill: none; stroke: var(--detect); stroke-width: 1.5; stroke-dasharray: 2 2; opacity: 0; }
+  .host[data-x="1"] .detect { opacity: .9; }
+  .host[data-i="1"] .shape { stroke: var(--impact); stroke-width: 3; }
+  .host .pulse { fill: none; stroke-width: 2; opacity: 0; }
+  .host .pulse.scan { stroke: var(--user); animation: pulse 700ms ease-out; }
+  .host .pulse.exploit { stroke: var(--priv); stroke-width: 3; animation: pulse 700ms ease-out; }
+  @keyframes pulse { from { r: 8px; opacity: 1; } to { r: 22px; opacity: 0; } }
+  .host:hover .shape { stroke: #fff; }
+  .badge rect { fill: var(--blue); }
+  .badge text { fill: #fff; font-size: 12px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+  .badge.busy rect { fill: #2a4170; }
+  .act { fill: none; stroke-width: 2.2; }
+  .act.busy { stroke-dasharray: 4 3; opacity: .6; }
+  .act.violating { stroke: var(--bad) !important; stroke-width: 3.5; }
+  .act-label { font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+  .red-start { fill: none; stroke: var(--session); stroke-width: 1; stroke-dasharray: 1 2; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="title"></h1>
+    <div class="sub mono" id="subtitle"></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><span>Step</span><b class="mono" id="st-step"></b></div>
+    <div class="stat"><span>Phase</span><b id="st-phase"></b></div>
+    <div class="stat"><span>Reward (step)</span><b class="mono" id="st-r"></b></div>
+    <div class="stat"><span>Return so far</span><b class="mono" id="st-ret"></b></div>
+    <div class="stat"><span>Compromised (user / priv)</span><b class="mono" id="st-comp"></b></div>
+    <div class="stat"><span>Red active</span><b class="mono" id="st-red"></b></div>
+  </div>
+</header>
+<main>
+  <div id="map-wrap"><svg id="map" viewBox="0 0 1400 720" role="img" aria-label="Network map"></svg></div>
+  <aside>
+    <section><h2>Blue agents: action this step</h2><table id="blue-table" class="mono"></table></section>
+    <section><h2>Red agents</h2><table id="red-table" class="mono"></table></section>
+    <section><h2>Events (latest first)</h2><div id="log" class="mono"></div></section>
+  </aside>
+</main>
+<div class="controls">
+  <button id="b-start" title="Start (Home)">⏮</button>
+  <button id="b-prev" title="Back one step (←, shift = 10)">◀</button>
+  <button id="b-play" title="Play / pause (space)">▶ Play</button>
+  <button id="b-next" title="Forward one step (→, shift = 10)">▶</button>
+  <select id="speed" title="Steps per second">
+    <option value="2">2 steps/s</option><option value="5">5 steps/s</option><option value="10" selected>10 steps/s</option>
+    <option value="25">25 steps/s</option><option value="60">60 steps/s</option>
+  </select>
+  <input id="scrub" type="range" min="0" value="0">
+  <span class="kbd">space play · ←/→ step · shift ×10 · click timeline to seek</span>
+</div>
+<div id="timeline-wrap"><canvas id="timeline"></canvas></div>
+<div class="legend" id="legend"></div>
+<div id="tip"></div>
+
+<script>
+const D = /*__DATA__*/null;
+(() => {
+const T = D.T, NH = D.hosts.name.length, NB = D.blue_subnets.length, NR = D.red_start.length;
+const SN = D.subnets;
+const LEVEL = ["clean", "user", "privileged"];
+const TYPES = D.blue_types, KINDS = D.traffic_kinds;
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const TYPE_COLOR = TYPES.map((t) => css(`--t-${t}`));
+const HOST_TYPES = new Set(["analyse", "remove", "restore", "decoy"]);
+const PHASE_NAME = ["0 · pre-mission", "1 · mission A", "2 · mission B"];
+const SHORT = { RESTRICTED_ZONE_A: "RZA", RESTRICTED_ZONE_B: "RZB", OPERATIONAL_ZONE_A: "OZA", OPERATIONAL_ZONE_B: "OZB",
+  CONTRACTOR_NETWORK: "CON", ADMIN_NETWORK: "ADM", OFFICE_NETWORK: "OFF", PUBLIC_ACCESS_ZONE: "PUB", INTERNET: "NET" };
+const LABEL = { RESTRICTED_ZONE_A: "Restricted Zone A", RESTRICTED_ZONE_B: "Restricted Zone B", OPERATIONAL_ZONE_A: "Operational Zone A",
+  OPERATIONAL_ZONE_B: "Operational Zone B", CONTRACTOR_NETWORK: "Contractor Network", ADMIN_NETWORK: "Admin (HQ)",
+  OFFICE_NETWORK: "Office (HQ)", PUBLIC_ACCESS_ZONE: "Public Access (HQ)", INTERNET: "Internet" };
+// Hand layout mirroring the CC4 diagram: contractor left, deployed networks A and B centre, HQ right.
+const POS = { INTERNET: [700, 82], CONTRACTOR_NETWORK: [170, 330], RESTRICTED_ZONE_A: [455, 250], OPERATIONAL_ZONE_A: [455, 590],
+  RESTRICTED_ZONE_B: [790, 250], OPERATIONAL_ZONE_B: [790, 590], PUBLIC_ACCESS_ZONE: [1150, 235], ADMIN_NETWORK: [1035, 600],
+  OFFICE_NETWORK: [1265, 600] };
+
+// ---- decode frames ----
+const digits = (s) => Uint8Array.from(s, (ch) => ch.charCodeAt(0) - 48);
+const F = {
+  comp: D.frames.compromised.map(digits), act: D.frames.red_activity.map(digits), det: D.frames.detected.map(digits),
+  dec: D.frames.decoys.map(digits), imp: D.frames.impact.map(digits),
+  red: D.frames.red_mask.map((s) => Int8Array.from(s.split(","), Number)),
+  blocked: D.frames.blocked, phase: D.frames.phase, redActive: D.frames.red_active,
+};
+const S = D.steps;
+const cum = [0]; for (let i = 0; i < T; i++) cum.push(cum[i] + S.reward[i]);
+
+// ---- host names ----
+const counters = {};
+const shortName = D.hosts.name.map((_, i) => {
+  const sub = SN[D.hosts.subnet[i]], role = D.hosts.role[i];
+  if (role === "router") return `${SHORT[sub]} router`;
+  const k = `${sub}/${role}`; counters[k] = (counters[k] ?? -1) + 1;
+  return `${SHORT[sub]} ${role} ${counters[k]}`;
+});
+
+// ---- layout ----
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("map");
+const el = (tag, attrs = {}, parent) => {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+const defs = el("defs", {}, svg);
+TYPES.forEach((t, i) => {
+  const m = el("marker", { id: `arr-${t}`, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" }, defs);
+  el("path", { d: "M0,0 L10,5 L0,10 z", fill: TYPE_COLOR[i] }, m);
+});
+const mBad = el("marker", { id: "arr-bad", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" }, defs);
+el("path", { d: "M0,0 L10,5 L0,10 z", fill: css("--bad") }, mBad);
+
+const gEdges = el("g", {}, svg), gClusters = el("g", {}, svg), gBlocked = el("g", {}, svg);
+const gHosts = el("g", {}, svg), gActs = el("g", {}, svg), gBadges = el("g", {}, svg);
+
+const hostPos = new Array(NH), cluster = {};
+SN.forEach((name, s) => {
+  const members = [...Array(NH).keys()].filter((i) => D.hosts.subnet[i] === s);
+  const router = members.filter((i) => D.hosts.role[i] === "router");
+  const rest = members.filter((i) => D.hosts.role[i] !== "router")
+    .sort((a, b) => (D.hosts.role[a] === "server" ? 0 : 1) - (D.hosts.role[b] === "server" ? 0 : 1));
+  const [cx, cy] = POS[name];
+  const c = 21, offset = router.length ? 1 : 0;
+  router.forEach((i) => (hostPos[i] = [cx, cy]));
+  rest.forEach((i, k) => {  // phyllotaxis spiral around the router
+    const r = c * Math.sqrt(k + offset + 0.6), a = (k + offset) * 2.39996;
+    hostPos[i] = [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  });
+  const R = Math.max(34, c * Math.sqrt(rest.length + offset + 0.6) + 20);
+  cluster[s] = { cx, cy, R };
+  el("circle", { class: "cluster", cx, cy, r: R }, gClusters);
+  const lbl = el("text", { class: "cluster-label", x: cx, y: cy - R - 10 }, gClusters);
+  lbl.textContent = LABEL[name] ?? name;
+});
+
+const edgeEnds = (a, b, pad = 0) => {
+  const A = cluster[a], B = cluster[b], dx = B.cx - A.cx, dy = B.cy - A.cy, L = Math.hypot(dx, dy) || 1;
+  const ux = dx / L, uy = dy / L;
+  return [A.cx + ux * (A.R + pad), A.cy + uy * (A.R + pad), B.cx - ux * (B.R + pad), B.cy - uy * (B.R + pad), ux, uy];
+};
+const INET = SN.indexOf("INTERNET");
+for (let a = 0; a < SN.length; a++) for (let b = a + 1; b < SN.length; b++) {
+  if (!(D.adjacency[a][b] || D.adjacency[b][a])) continue;
+  const [x1, y1, x2, y2] = edgeEnds(a, b);
+  el("line", { class: a === INET || b === INET ? "edge inet" : "edge", x1, y1, x2, y2 }, gEdges);
+}
+
+// hosts
+const hostEl = [], pulseEl = [];
+const tip = document.getElementById("tip");
+D.hosts.name.forEach((name, i) => {
+  const [x, y] = hostPos[i], role = D.hosts.role[i];
+  const g = el("g", { class: "host", transform: `translate(${x.toFixed(1)},${y.toFixed(1)})` }, gHosts);
+  if (role === "router") el("rect", { class: "shape", x: -8, y: -8, width: 16, height: 16, transform: "rotate(45)" }, g);
+  else if (role === "server") el("rect", { class: "shape", x: -7, y: -7, width: 14, height: 14, rx: 2.5 }, g);
+  else el("circle", { class: "shape", r: 7 }, g);
+  el("circle", { class: "ring", r: 11.5 }, g);
+  el("circle", { class: "detect", r: 14.5 }, g);
+  el("circle", { class: "decoy", cx: 8, cy: -8, r: 3.2 }, g);
+  pulseEl.push(el("circle", { class: "pulse", r: 8 }, g));
+  if (D.red_start.includes(i)) el("circle", { class: "red-start", r: 17 }, g);
+  g.addEventListener("mousemove", (ev) => showTip(ev, i));
+  g.addEventListener("mouseleave", () => (tip.style.display = "none"));
+  hostEl.push(g);
+});
+
+// blue badges: beside the subnet label for one-subnet agents, centroid of the subnets otherwise (B4 covers HQ)
+const badgePos = D.blue_subnets.map((subs) => {
+  if (subs.length === 1) {
+    const { cx, cy, R } = cluster[subs[0]], half = (LABEL[SN[subs[0]]] ?? SN[subs[0]]).length * 3.9;
+    return [cx + half + 26, cy - R - 14];
+  }
+  const avg = (f) => subs.reduce((p, s) => p + f(cluster[s]), 0) / subs.length;
+  return [avg((c) => c.cx), avg((c) => c.cy)];
+});
+const badgeEl = badgePos.map(([x, y], a) => {
+  const g = el("g", { class: "badge", transform: `translate(${x},${y})` }, gBadges);
+  el("rect", { x: -17, y: -11, width: 34, height: 22, rx: 11 }, g);
+  el("text", {}, g).textContent = `B${a}`;
+  return g;
+});
+
+// ---- events ----
+const events = [[]];  // events[t] = list of [cls, text] for step t
+for (let t = 1; t <= T; t++) {
+  const ev = [], s = t - 1;
+  for (let a = 0; a < NB; a++) {
+    if (S.busy[s][a]) continue;
+    const ty = TYPES[S.a_type[s][a]];
+    if (ty === "sleep" || ty === "monitor") continue;
+    ev.push(blueEvent(s, a));
+  }
+  for (let i = 0; i < NH; i++) {
+    const p = F.comp[t - 1][i], c = F.comp[t][i];
+    if (c !== p) ev.push([c > p ? "red" : "good", `${shortName[i]}: ${LEVEL[p]} → ${LEVEL[c]}`]);
+    const gained = F.red[t][i] & ~F.red[t - 1][i], lost = F.red[t - 1][i] & ~F.red[t][i];
+    for (let r = 0; r < NR; r++) {
+      if (gained & (1 << r)) ev.push(["red", `red_${r} session on ${shortName[i]}`]);
+      if (lost & (1 << r)) ev.push(["good", `red_${r} lost session on ${shortName[i]}`]);
+    }
+    if (F.imp[t][i] && !F.imp[t - 1][i]) ev.push(["bad", `impact attempted on ${shortName[i]}`]);
+  }
+  const newly = F.redActive[t] & ~F.redActive[t - 1];
+  for (let r = 0; r < NR; r++) if (newly & (1 << r)) ev.push(["red", `red_${r} activated`]);
+  if (F.phase[t] !== F.phase[t - 1]) ev.push(["blue", `mission phase ${PHASE_NAME[F.phase[t]] ?? F.phase[t]}`]);
+  events.push(ev);
+}
+function actionText(s, a) {
+  const ty = TYPES[S.a_type[s][a]], tg = S.target[s][a];
+  if (HOST_TYPES.has(ty)) return `${ty} ${tg >= 0 ? shortName[tg] : "?"}`;
+  if (ty === "block" || ty === "allow") return `${ty} ${SHORT[SN[S.src[s][a]]] ?? "?"}→${SHORT[SN[S.dst[s][a]]] ?? "?"}`;
+  return ty;
+}
+function blueEvent(s, a) {
+  const k = S.kind[s][a], kind = k >= 0 ? ` (${KINDS[k]})` : "";
+  return [KINDS[k] === "violating" ? "bad" : "blue", `blue_${a} ${actionText(s, a)}${kind}`];
+}
+
+// ---- rendering ----
+const $ = (id) => document.getElementById(id);
+let cur = 0;
+function render(t, animate) {
+  cur = t;
+  const comp = F.comp[t], red = F.red[t];
+  let nu = 0, np = 0;
+  for (let i = 0; i < NH; i++) {
+    const g = hostEl[i];
+    g.dataset.c = comp[i]; g.dataset.s = red[i] ? 1 : 0; g.dataset.d = F.dec[t][i];
+    g.dataset.x = F.det[t][i]; g.dataset.i = F.imp[t][i];
+    if (comp[i] === 1) nu++; else if (comp[i] === 2) np++;
+    const p = pulseEl[i], a = F.act[t][i];
+    p.classList.remove("scan", "exploit");
+    if (animate && a) { p.getBoundingClientRect(); p.classList.add(a === 1 ? "scan" : "exploit"); }
+  }
+  // blocked links: bar at the destination end of src -> dst
+  gBlocked.replaceChildren();
+  for (const [dst, src] of F.blocked[t]) {
+    const [x1, y1, x2, y2, ux, uy] = edgeEnds(src, dst, 4);
+    el("line", { class: "block-line", x1, y1, x2, y2 }, gBlocked);
+    const bx = x2 - ux * 6, by = y2 - uy * 6;
+    el("line", { class: "block-bar", x1: bx - uy * 9, y1: by + ux * 9, x2: bx + uy * 9, y2: by - ux * 9 }, gBlocked)
+      .appendChild(el("title")).textContent = `${SN[src]} → ${SN[dst]} blocked`;
+  }
+  // blue actions during step t
+  gActs.replaceChildren();
+  const bt = $("blue-table"); bt.replaceChildren();
+  for (let a = 0; a < NB; a++) {
+    const row = bt.insertRow();
+    const cName = row.insertCell(), cAct = row.insertCell();
+    cName.textContent = `B${a}`; cName.title = D.blue_subnets[a].map((s) => SN[s]).join(", ");
+    if (t === 0) { cAct.textContent = "—"; badgeEl[a].classList.remove("busy"); continue; }
+    const s = t - 1, ty = TYPES[S.a_type[s][a]], busy = !!S.busy[s][a], k = S.kind[s][a];
+    badgeEl[a].classList.toggle("busy", busy);
+    cAct.innerHTML = `<span class="swatch" style="background:${TYPE_COLOR[S.a_type[s][a]]}"></span>`;
+    cAct.append(actionText(s, a));
+    if (k >= 0) cAct.insertAdjacentHTML("beforeend", `<span class="tag ${KINDS[k]}">${KINDS[k]}</span>`);
+    if (busy) cAct.insertAdjacentHTML("beforeend", `<span class="tag busy">busy</span>`);
+    drawAction(s, a, ty, busy, k);
+  }
+  // red table
+  const rt = $("red-table"); rt.replaceChildren();
+  for (let r = 0; r < NR; r++) {
+    let held = 0, priv = 0;
+    for (let i = 0; i < NH; i++) if (red[i] & (1 << r)) { held++; if (comp[i] === 2) priv++; }
+    const active = !!(F.redActive[t] & (1 << r));
+    const row = rt.insertRow();
+    row.insertCell().textContent = `red_${r}`;
+    row.insertCell().innerHTML = active ? `<span style="color:var(--session)">active</span>` : `<span style="color:var(--muted)">idle</span>`;
+    row.insertCell().textContent = `${held} hosts${priv ? ` (${priv} priv)` : ""}`;
+  }
+  // header
+  $("st-step").textContent = `${t} / ${T}`;
+  $("st-phase").textContent = PHASE_NAME[F.phase[t]] ?? F.phase[t];
+  $("st-r").textContent = t ? S.reward[t - 1].toFixed(1) : "—";
+  $("st-ret").textContent = cum[t].toFixed(1);
+  $("st-comp").textContent = `${nu} / ${np}`;
+  $("st-red").textContent = `${popcount(F.redActive[t])} / ${NR}`;
+  $("scrub").value = t;
+  renderLog(t);
+  drawCursor();
+}
+const popcount = (x) => { let n = 0; while (x) { n += x & 1; x >>= 1; } return n; };
+
+function drawAction(s, a, ty, busy, k) {
+  const color = TYPE_COLOR[S.a_type[s][a]], violating = KINDS[k] === "violating";
+  const cls = `act${busy ? " busy" : ""}${violating ? " violating" : ""}`;
+  const marker = `url(#arr-${violating ? "bad" : ty})`;
+  const [bx, by] = badgePos[a];
+  if (HOST_TYPES.has(ty) && S.target[s][a] >= 0) {
+    const [hx, hy] = hostPos[S.target[s][a]];
+    const dx = hx - bx, dy = hy - by, L = Math.hypot(dx, dy) || 1;
+    const ex = hx - dx / L * 13, ey = hy - dy / L * 13;  // stop at the host's ring
+    const mx = (bx + ex) / 2 - dy / L * 30, my = (by + ey) / 2 + dx / L * 30;
+    el("path", { class: cls, d: `M${bx},${by} Q${mx},${my} ${ex},${ey}`, stroke: color, "marker-end": marker }, gActs);
+    label(mx, my, ty, color);
+  } else if ((ty === "block" || ty === "allow") && S.src[s][a] >= 0 && S.dst[s][a] >= 0) {
+    const [x1, y1, x2, y2] = edgeEnds(S.src[s][a], S.dst[s][a], 6);
+    el("line", { class: cls, x1, y1, x2, y2, stroke: color, "marker-end": marker }, gActs);
+    label((x1 + x2) / 2, (y1 + y2) / 2 - 6, `B${a} ${ty}${violating ? " ✗" : ""}`, violating ? css("--bad") : color);
+  }
+}
+function label(x, y, text, color) {
+  const t = el("text", { class: "act-label", x, y, fill: color, "text-anchor": "middle" }, gActs);
+  t.textContent = text;
+}
+function renderLog(t) {
+  const log = $("log"); log.replaceChildren();
+  let n = 0;
+  for (let s = t; s >= 1 && n < 80; s--) for (const [cls, text] of events[s]) {
+    const d = document.createElement("div");
+    if (s === t) d.className = "now";
+    d.innerHTML = `<span class="s">${s}</span>`;
+    const sp = document.createElement("span"); sp.className = cls; sp.textContent = text; d.append(sp);
+    log.append(d); n++;
+  }
+  if (!n) log.innerHTML = `<div style="color:var(--muted)">no events yet</div>`;
+}
+function showTip(ev, i) {
+  const t = cur, mask = F.red[t][i], who = [];
+  for (let r = 0; r < NR; r++) if (mask & (1 << r)) who.push(`red_${r}`);
+  tip.innerHTML = `<b>${shortName[i]}</b><br><span class="mono" style="color:var(--muted)">${D.hosts.name[i]}</span><br>` +
+    `compromise: ${LEVEL[F.comp[t][i]]}<br>sessions: ${who.join(", ") || "none"}<br>decoy: ${F.dec[t][i] ? "yes" : "no"}` +
+    `${F.det[t][i] ? "<br>activity detected" : ""}${D.red_start.includes(i) ? "<br>red start host" : ""}`;
+  tip.style.display = "block";
+  tip.style.left = `${ev.clientX + 14}px`; tip.style.top = `${ev.clientY + 14}px`;
+}
+
+// ---- timeline (canvas) ----
+const cv = $("timeline"), ctx = cv.getContext("2d");
+let bg = null, geo = null;
+function drawTimeline() {
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const off = document.createElement("canvas"); off.width = cv.width; off.height = cv.height;
+  const c = off.getContext("2d"); c.scale(dpr, dpr);
+  const L = 92, Rm = 8, w = W - L - Rm, x = (t) => L + (t / T) * w;
+  const rows = { ret: [4, 46], rew: [54, 26], comp: [84, 30], blue: [120, 66] };
+  geo = { L, w, x, H };
+  c.font = "11px system-ui, sans-serif"; c.fillStyle = css("--muted"); c.textBaseline = "middle";
+  // cumulative return
+  const lo = Math.min(...cum), hi = Math.max(0, ...cum), [ry, rh] = rows.ret;
+  c.fillText("return", 4, ry + rh / 2);
+  c.fillText(lo.toFixed(0), L - 34, ry + rh - 4);
+  c.beginPath(); c.moveTo(x(0), ry + (hi - cum[0]) / (hi - lo || 1) * rh);
+  for (let t = 1; t <= T; t++) c.lineTo(x(t), ry + (hi - cum[t]) / (hi - lo || 1) * rh);
+  c.strokeStyle = css("--blue"); c.lineWidth = 1.5; c.stroke();
+  // per-step reward (negative bars)
+  const [wy, wh] = rows.rew, minR = Math.min(-1, ...S.reward);
+  c.fillText("reward/step", 4, wy + wh / 2);
+  c.fillStyle = css("--priv");
+  for (let s = 0; s < T; s++) if (S.reward[s] < 0) {
+    const h = (S.reward[s] / minR) * wh; c.fillRect(x(s), wy, Math.max(1, w / T), h);
+  }
+  // compromised hosts (stacked user / priv)
+  const [cy, ch] = rows.comp;
+  const counts = F.comp.map((r) => { let u = 0, p = 0; for (const v of r) { if (v === 1) u++; else if (v === 2) p++; } return [u, p]; });
+  const maxC = Math.max(1, ...counts.map(([u, p]) => u + p));
+  c.fillStyle = css("--muted"); c.fillText(`compromised`, 4, cy + ch / 2 - 6); c.fillText(`(max ${maxC})`, 4, cy + ch / 2 + 7);
+  for (let t = 0; t <= T; t++) {
+    const [u, p] = counts[t], hp = p / maxC * ch, hu = u / maxC * ch, bw = Math.max(1, w / T);
+    c.fillStyle = css("--priv"); c.fillRect(x(t), cy + ch - hp, bw, hp);
+    c.fillStyle = css("--user"); c.fillRect(x(t), cy + ch - hp - hu, bw, hu);
+  }
+  // blue action strips
+  const [by, bh] = rows.blue, rowH = bh / NB;
+  for (let a = 0; a < NB; a++) {
+    c.fillStyle = css("--muted"); c.fillText(`B${a}`, 4, by + rowH * (a + 0.5));
+    for (let s = 0; s < T; s++) {
+      c.globalAlpha = S.busy[s][a] ? 0.35 : 1;
+      c.fillStyle = TYPE_COLOR[S.a_type[s][a]];
+      c.fillRect(x(s), by + rowH * a + 1, Math.max(1, w / T) + 0.3, rowH - 2);
+      if (KINDS[S.kind[s][a]] === "violating" && !S.busy[s][a]) {
+        c.globalAlpha = 1; c.fillStyle = css("--bad"); c.fillRect(x(s), by + rowH * a, Math.max(1.5, w / T), 3);
+      }
+    }
+    c.globalAlpha = 1;
+  }
+  // phase boundaries
+  c.strokeStyle = "#ffffff33"; c.setLineDash([3, 3]);
+  for (const pb of D.phase_boundaries) if (pb > 0) { c.beginPath(); c.moveTo(x(pb), 0); c.lineTo(x(pb), H); c.stroke(); }
+  c.setLineDash([]);
+  bg = off; drawCursor();
+}
+function drawCursor() {
+  if (!bg) return;
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); ctx.drawImage(bg, 0, 0);
+  ctx.scale(dpr, dpr);
+  const X = geo.x(cur); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(X, 0); ctx.lineTo(X, geo.H); ctx.stroke();
+}
+let dragging = false;
+const seekFromEvent = (ev) => {
+  const r = cv.getBoundingClientRect(), t = Math.round(((ev.clientX - r.left - geo.L) / geo.w) * T);
+  stop(); render(Math.max(0, Math.min(T, t)), false);
+};
+cv.addEventListener("mousedown", (ev) => { dragging = true; seekFromEvent(ev); });
+window.addEventListener("mousemove", (ev) => dragging && seekFromEvent(ev));
+window.addEventListener("mouseup", () => (dragging = false));
+window.addEventListener("resize", drawTimeline);
+
+// ---- playback ----
+let timer = null;
+const speed = () => Number($("speed").value);
+function play() {
+  if (cur >= T) render(0, false);
+  $("b-play").textContent = "⏸ Pause";
+  document.documentElement.style.setProperty("--fade", `${Math.min(220, 800 / speed())}ms`);
+  let last = performance.now(), acc = 0;
+  const tick = (now) => {
+    acc += (now - last) / 1000 * speed(); last = now;
+    const n = Math.floor(acc);
+    if (n > 0) { acc -= n; render(Math.min(T, cur + n), n === 1); }
+    if (cur >= T) return stop();
+    timer = requestAnimationFrame(tick);
+  };
+  timer = requestAnimationFrame(tick);
+}
+function stop() { if (timer) cancelAnimationFrame(timer); timer = null; $("b-play").textContent = "▶ Play"; }
+const toggle = () => (timer ? stop() : play());
+const stepBy = (d) => { stop(); render(Math.max(0, Math.min(T, cur + d)), d === 1); };
+$("b-play").onclick = toggle;
+$("b-prev").onclick = (e) => stepBy(e.shiftKey ? -10 : -1);
+$("b-next").onclick = (e) => stepBy(e.shiftKey ? 10 : 1);
+$("b-start").onclick = () => { stop(); render(0, false); };
+$("speed").onchange = () => { if (timer) { stop(); play(); } };
+const scrub = $("scrub"); scrub.max = T;
+scrub.oninput = () => { stop(); render(Number(scrub.value), false); };
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+  if (e.key === " ") { e.preventDefault(); toggle(); }
+  else if (e.key === "ArrowRight") stepBy(e.shiftKey ? 10 : 1);
+  else if (e.key === "ArrowLeft") stepBy(e.shiftKey ? -10 : -1);
+  else if (e.key === "Home") { stop(); render(0, false); }
+  else if (e.key === "End") { stop(); render(T, false); }
+});
+
+// ---- header, legend, start ----
+document.title = `cc4lab · ${D.title}`;
+$("title").textContent = D.title;
+$("subtitle").textContent = `return ${D.meta.return} · recipe ${D.meta.recipe ?? "?"} · jaxborg ${String(D.meta.jaxborg_commit).slice(0, 8)} · ${D.meta.model}`;
+const legend = $("legend");
+const sw = (color, text, shape = "2px") => `<span><span class="swatch" style="background:${color};border-radius:${shape}"></span>${text}</span>`;
+legend.innerHTML = [
+  sw(css("--clean"), "clean", "50%"), sw(css("--user"), "user access", "50%"), sw(css("--priv"), "privileged", "50%"),
+  `<span><span class="swatch" style="border:2px solid var(--session);border-radius:50%"></span>red session</span>`,
+  sw(css("--decoy"), "decoy", "50%"),
+  `<span><span class="swatch" style="border:1.5px dashed var(--detect);border-radius:50%"></span>activity detected</span>`,
+  `<span><span class="swatch" style="border:2px solid var(--impact)"></span>impact attempted</span>`,
+  `<span>◆ router · ■ server · ● user host · dotted ring = red start host</span>`,
+  `<span style="color:var(--t-block)">▍ blocked link (bar at destination)</span>`,
+  ...TYPES.map((t, i) => sw(TYPE_COLOR[i], t)),
+  `<span style="color:var(--bad)">magenta = Block/Allow violating the phase's comms policy</span>`,
+  `<span>faded strip / dashed arrow = agent busy finishing an earlier action</span>`,
+].join("");
+drawTimeline();
+const fromHash = Number((location.hash.match(/t=(\d+)/) || [])[1] || 0);  // deep link: file.html#t=250
+render(Math.min(T, fromHash), false);
+})();
+</script>
+</body>
+</html>
