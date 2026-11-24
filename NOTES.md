@@ -548,3 +548,54 @@ in every seed (-116 / -180 / -353 / -230), and "all Blocks -> Sleep" is identica
   +100). So *violating* the communication policy is costly while *enforcing* it is worth about nothing, which
   is consistent with the firewall-only rulebook scoring the same as Sleep. Counts are over 8 full episodes.
 - **Caveats:** one branch time (t = 250), 3 bases, 16 keys; the SEs cover key sampling only.
+
+## NIST-informed reference ladder and rule-violation rates
+
+Spec: `RULEBOOK.md` (R1 Firewall = PR.IR-01, R2 Remove = RS.MI-02, R4 Restore = RC.RP-02; R3 Contain
+dropped, §12 there). Code: `policies/rulebook.py` (`RulebookConfig`, `make_rulebook`, `RUNGS`),
+`rules.py` (`rule_violations`), `scripts/reference_ladder.py`, `scripts/violation_rates.py`. Raw output:
+`~/cc4lab-exp/results/reference_ladder_seeds{1000,0}.{log,json}`, `violation_rates.{log,json}`.
+
+- **Ladder** (full episodes, mean +/- SE, paired differences on the same seeds; L5 under busy_corrected,
+  the rest raw; L0 = always Sleep):
+
+  | rung | config | selection seeds 1000-1031 | evaluation seeds 0-31 | eval: rung - L1 (paired) |
+  |---|---|---|---|---|
+  | L0 | always Sleep | -6171 +/- 250 | -6260 +/- 212 | +2 +/- 20 |
+  | L1 | firewall only | -6143 +/- 248 | -6262 +/- 212 | |
+  | **L2** | **L1 + Remove flagged host** | **-3240 +/- 173** | **-3319 +/- 151** | **+2942 +/- 197** |
+  | L3 | L2, idle = Monitor | -3240 +/- 173 | -3319 +/- 151 | identical to L2 |
+  | L5 | L2 + Restore escalation p = 0.25 | -2784 +/- 161 | -2859 +/- 137 | +3403 +/- 203 (L5 - L2: +460 +/- 116) |
+  | L2-respond-first | R2 before R1 | -3217 +/- 169 | -3315 +/- 151 | (- L2: +5 +/- 6) |
+
+  For comparison, the four trained policies on the evaluation seeds: -2091 to -2683.
+- **Decisions (made on the selection seeds, RULEBOOK.md §6.3):**
+  1. Idle = **Sleep**: L3 - L2 = 0.0 +/- 0.0. Not a tie by chance: explicit Monitor has **no effect** in
+     jaxborg. L3 submits Monitor on 93% of steps, yet its actions (up to Sleep <-> Monitor) and rewards are
+     identical to L2's, and the final states differ only in `blue_pending_action` (the record of the last
+     submitted action). The automatic per-step Monitor does all the detection. Resolves RULEBOOK §3/§11.
+  2. Primary reference = **L2**. Sensitivity references: L1 and L5 (L5 needs `cost_mode=busy_corrected`;
+     `attribute_branch.py` refuses it under raw).
+  3. Rule 4 (does the reference beat the trained policies?) does **not** trigger: L2 is 636-1228 points
+     below every trained seed; L5 is 176-768 below. Attribution against L2 therefore means "versus a
+     scripted incident responder that is worse than the trained team", so positive values remain expected.
+- **Reading it.** Two rules recover most of the gap: L2 closes about 70% of the distance from Sleep (-6260)
+  to the best trained policy (-2091), with no learning. Firewall compliance (R1) adds nothing (L1 = L0, as
+  item 1 predicted); the value is all in R2. Priority order does not matter (respond-first +5 +/- 6).
+- **Violation rates of the trained policies** (`violation_rates.py`, 8 full episodes per seed, per 100 steps,
+  busy agents exempt). Controls behave as constructed: L1 has zero firewall flags; L2 has zero firewall flags
+  and leaves incidents unaddressed on <= 0.07 steps per 100 (only when R1 takes priority).
+
+  | flag (per 100 steps) | agents 0-3, range over 4 seeds | agent 4, range over 4 seeds |
+  |---|---|---|
+  | `firewall_unaddressed` (omission, R1) | 34-50 | 43-45 |
+  | `firewall_violating` (commission, R1) | 0.33-1.73 | **1.85-2.40** (highest in every seed) |
+  | share of violating Blocks that are `contain_justified` | 0-5% | 0-7% |
+  | `incident_unaddressed` (omission, R2) | 1.2-1.8 | 2.5-2.9 |
+  | `restore_unjustified` | 3.6-5.7 | 5.2-6.1 |
+
+  Agent 4 commits the most R1 violations in every seed, matching its negative swap value; almost none of
+  those Blocks happen while the destination subnet shows a compromise, so they are not containment in any
+  observable sense. Omission of R1 is common for every agent but cheap (fixing mismatches is worth about
+  nothing, L1 = L0); commission is rare but costly (item 1). Trained agents also Restore unflagged hosts
+  3.6-6.1 times per 100 steps, consistent with their near-uniform action mix.
