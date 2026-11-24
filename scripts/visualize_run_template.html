@@ -52,7 +52,7 @@
   /* map */
   .cluster { fill: #141a20; stroke: var(--line); stroke-width: 1.5; }
   .cluster-label { fill: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .03em; text-anchor: middle; }
-  .edge { stroke: #344050; stroke-width: 2; }
+  .edge { stroke: #344050; stroke-width: 2; fill: none; }
   .edge.inet { stroke: #232b35; stroke-width: 1; stroke-dasharray: 2 4; }
   .block-bar { stroke: var(--t-block); stroke-width: 5; stroke-linecap: round; }
   .block-line { stroke: var(--t-block); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .7; fill: none; }
@@ -202,17 +202,7 @@ SN.forEach((name, s) => {
   lbl.textContent = LABEL[name] ?? name;
 });
 
-const edgeEnds = (a, b, pad = 0) => {
-  const A = cluster[a], B = cluster[b], dx = B.cx - A.cx, dy = B.cy - A.cy, L = Math.hypot(dx, dy) || 1;
-  const ux = dx / L, uy = dy / L;
-  return [A.cx + ux * (A.R + pad), A.cy + uy * (A.R + pad), B.cx - ux * (B.R + pad), B.cy - uy * (B.R + pad), ux, uy];
-};
 const INET = SN.indexOf("INTERNET");
-for (let a = 0; a < SN.length; a++) for (let b = a + 1; b < SN.length; b++) {
-  if (!(D.adjacency[a][b] || D.adjacency[b][a])) continue;
-  const [x1, y1, x2, y2] = edgeEnds(a, b);
-  el("line", { class: a === INET || b === INET ? "edge inet" : "edge", x1, y1, x2, y2 }, gEdges);
-}
 
 // hosts
 const hostEl = [], pulseEl = [];
@@ -248,6 +238,118 @@ const badgeEl = badgePos.map(([x, y], a) => {
   el("text", {}, g).textContent = `B${a}`;
   return g;
 });
+
+// ---- link routing ----
+// Each subnet-to-subnet link is a cubic Bezier chosen so that it never passes over or behind another
+// subnet's circle, label, or a blue badge. Candidates are single arcs and "bridges" (leave perpendicular,
+// run parallel, come back in) at increasing offsets to either side; the shortest clear one wins.
+// Static links, blocked-link markers and Block/Allow arrows all share one route per subnet pair.
+const ROUTE_PAD = 12, SAMPLES = 48;
+const rects = [];
+SN.forEach((name, s) => {
+  const { cx, cy, R } = cluster[s], w = (LABEL[name] ?? name).length * 7.8 + 10;
+  rects.push({ x0: cx - w / 2, x1: cx + w / 2, y0: cy - R - 26, y1: cy - R - 2 });  // subnet label
+});
+badgePos.forEach(([x, y]) => rects.push({ x0: x - 22, x1: x + 22, y0: y - 16, y1: y + 16 }));
+const bez = (P, t) => {
+  const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+  return [a * P[0][0] + b * P[1][0] + c * P[2][0] + d * P[3][0], a * P[0][1] + b * P[1][1] + c * P[2][1] + d * P[3][1]];
+};
+// Bezier from A's rim (toward K1) to B's rim (toward K2). K1 === K2 gives a single-bend arc (a quadratic
+// written as a cubic); distinct points give an S-curve or a bridge.
+function curve(a, b, K1, K2) {
+  const A = cluster[a], B = cluster[b];
+  const rim = (C, K) => { const vx = K[0] - C.cx, vy = K[1] - C.cy, m = Math.hypot(vx, vy) || 1; return [C.cx + vx / m * (C.R + 4), C.cy + vy / m * (C.R + 4)]; };
+  const S = rim(A, K1), E = rim(B, K2);
+  if (K1 !== K2) return [S, K1, K2, E];
+  return [S, [S[0] + 2 / 3 * (K1[0] - S[0]), S[1] + 2 / 3 * (K1[1] - S[1])], [E[0] + 2 / 3 * (K1[0] - E[0]), E[1] + 2 / 3 * (K1[1] - E[1])], E];
+}
+// Family 1 (preferred, tidiest): arcs and bridges offset symmetrically to either side of the straight line.
+function symmetric(a, b) {
+  const A = cluster[a], B = cluster[b], dx = B.cx - A.cx, dy = B.cy - A.cy, L = Math.hypot(dx, dy) || 1;
+  const ux = dx / L, uy = dy / L, nx = -uy, ny = ux, out = [];
+  for (let off = 0; off <= 960; off += 20) for (const o of off ? [off, -off] : [0]) {
+    const K = [(A.cx + B.cx) / 2 + nx * o, (A.cy + B.cy) / 2 + ny * o];
+    out.push(curve(a, b, K, K));
+    out.push(curve(a, b, [A.cx + nx * o + ux * L * 0.15, A.cy + ny * o + uy * L * 0.15], [B.cx + nx * o - ux * L * 0.15, B.cy + ny * o - uy * L * 0.15]));
+  }
+  return out;
+}
+const grid = (step) => {
+  const g = [];
+  for (let x = -150; x <= 1550; x += step) for (let y = -150; y <= 870; y += step) g.push([x, y]);
+  return g;
+};
+const GRID_FINE = grid(40), GRID_COARSE = grid(80);
+// Family 2: one bend through any grid point. Family 3: S-curves through two grid points (boxed-in subnets).
+const singleBend = (a, b) => GRID_FINE.map((K) => curve(a, b, K, K));
+const sCurves = (a, b) => GRID_COARSE.flatMap((K1) => GRID_COARSE.map((K2) => curve(a, b, K1, K2)));
+function clearPath(P, a, b, maxLen = Infinity) {
+  const hull = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]) + Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]) + Math.hypot(P[3][0] - P[2][0], P[3][1] - P[2][1]);
+  if (Math.hypot(P[3][0] - P[0][0], P[3][1] - P[0][1]) > maxLen || hull > 2.2 * maxLen) return null;  // cheap prune vs current best
+  const pts = [];
+  let len = 0;
+  for (let i = 0; i <= SAMPLES; i++) {
+    const p = bez(P, i / SAMPLES);
+    if (i) len += Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]);
+    pts.push(p);
+  }
+  if (len >= maxLen) return null;
+  const n = Math.ceil(len / 4);  // obstacle test every ~4px so thin label boxes can't slip between samples
+  for (let i = 1; i < n; i++) {
+    const [x, y] = bez(P, i / n);
+    for (let s = 0; s < SN.length; s++) {
+      const C = cluster[s];
+      if (Math.hypot(x - C.cx, y - C.cy) < C.R + (s === a || s === b ? 1 : ROUTE_PAD)) return null;
+    }
+    for (const r of rects) if (x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1) return null;  // incl. own labels: enter from the side
+  }
+  return { P, pts, len };
+}
+const routes = new Map();
+function route(src, dst) {
+  const a = Math.min(src, dst), b = Math.max(src, dst), key = a * 32 + b;
+  if (!routes.has(key)) {
+    let best = null;
+    for (const family of [symmetric, singleBend, sCurves]) {  // later families only if earlier ones find nothing
+      for (const P of family(a, b)) {
+        const c = clearPath(P, a, b, best ? best.len : Infinity);
+        if (c) best = c;
+      }
+      if (best) break;
+    }
+    if (!best) {  // nothing clear anywhere: fall back to a straight line and say so
+      const mid = [(cluster[a].cx + cluster[b].cx) / 2, (cluster[a].cy + cluster[b].cy) / 2];
+      const P = curve(a, b, mid, mid), pts = [...Array(SAMPLES + 1).keys()].map((i) => bez(P, i / SAMPLES));
+      best = { P, pts, len: 0 };
+      console.warn(`no clear route between ${SN[a]} and ${SN[b]}`);
+    }
+    routes.set(key, best);
+  }
+  const r = routes.get(key);
+  return src === a ? r : { P: [...r.P].reverse(), pts: [...r.pts].reverse(), len: r.len };
+}
+const pathD = ({ P }) => `M${P[0]} C${P[1]} ${P[2]} ${P[3]}`;
+
+// Route every pair this episode can draw, then grow the viewBox if a detour leaves the default canvas.
+const pairs = new Set();
+const addPair = (s, d) => { if (s >= 0 && d >= 0 && s !== d) pairs.add(Math.min(s, d) * 32 + Math.max(s, d)); };
+for (let a = 0; a < SN.length; a++) for (let b = a + 1; b < SN.length; b++) if (D.adjacency[a][b] || D.adjacency[b][a]) addPair(a, b);
+for (const fr of D.frames.blocked) for (const [dst, src] of fr) addPair(src, dst);
+for (let s = 0; s < T; s++) for (let a = 0; a < NB; a++) {
+  const ty = TYPES[S.a_type[s][a]];
+  if (ty === "block" || ty === "allow") addPair(S.src[s][a], S.dst[s][a]);
+}
+let [vx0, vy0, vx1, vy1] = [0, 0, 1400, 720];
+for (const k of pairs) for (const [x, y] of route(k >> 5, k & 31).pts) {
+  vx0 = Math.min(vx0, x - 14); vy0 = Math.min(vy0, y - 14); vx1 = Math.max(vx1, x + 14); vy1 = Math.max(vy1, y + 14);
+}
+svg.setAttribute("viewBox", `${vx0} ${vy0} ${vx1 - vx0} ${vy1 - vy0}`);
+
+for (let a = 0; a < SN.length; a++) for (let b = a + 1; b < SN.length; b++) {
+  if (!(D.adjacency[a][b] || D.adjacency[b][a])) continue;
+  el("path", { class: a === INET || b === INET ? "edge inet" : "edge", d: pathD(route(a, b)) }, gEdges);
+}
 
 // ---- events ----
 const events = [[]];  // events[t] = list of [cls, text] for step t
@@ -304,8 +406,9 @@ function render(t, animate) {
   // blocked links: bar at the destination end of src -> dst
   gBlocked.replaceChildren();
   for (const [dst, src] of F.blocked[t]) {
-    const [x1, y1, x2, y2, ux, uy] = edgeEnds(src, dst, 4);
-    el("line", { class: "block-line", x1, y1, x2, y2 }, gBlocked);
+    const r = route(src, dst), [x2, y2] = r.pts[SAMPLES], [px, py] = r.pts[SAMPLES - 2];
+    const L = Math.hypot(x2 - px, y2 - py) || 1, ux = (x2 - px) / L, uy = (y2 - py) / L;  // direction arriving at dst
+    el("path", { class: "block-line", d: pathD(r) }, gBlocked);
     const bx = x2 - ux * 6, by = y2 - uy * 6;
     el("line", { class: "block-bar", x1: bx - uy * 9, y1: by + ux * 9, x2: bx + uy * 9, y2: by - ux * 9 }, gBlocked)
       .appendChild(el("title")).textContent = `${SN[src]} → ${SN[dst]} blocked`;
@@ -363,9 +466,9 @@ function drawAction(s, a, ty, busy, k) {
     el("path", { class: cls, d: `M${bx},${by} Q${mx},${my} ${ex},${ey}`, stroke: color, "marker-end": marker }, gActs);
     label(mx, my, ty, color);
   } else if ((ty === "block" || ty === "allow") && S.src[s][a] >= 0 && S.dst[s][a] >= 0) {
-    const [x1, y1, x2, y2] = edgeEnds(S.src[s][a], S.dst[s][a], 6);
-    el("line", { class: cls, x1, y1, x2, y2, stroke: color, "marker-end": marker }, gActs);
-    label((x1 + x2) / 2, (y1 + y2) / 2 - 6, `B${a} ${ty}${violating ? " ✗" : ""}`, violating ? css("--bad") : color);
+    const r = route(S.src[s][a], S.dst[s][a]), [mx, my] = r.pts[SAMPLES / 2];
+    el("path", { class: cls, d: pathD(r), stroke: color, "marker-end": marker }, gActs);
+    label(mx, my - 6, `B${a} ${ty}${violating ? " ✗" : ""}`, violating ? css("--bad") : color);
   }
 }
 function label(x, y, text, color) {
