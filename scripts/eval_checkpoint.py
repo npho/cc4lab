@@ -20,14 +20,14 @@ import numpy as np
 from cc4lab import env as E
 from cc4lab.policies import trivial
 from cc4lab.policies.loaders import checkpoint_info, load_policy
-from cc4lab.policies.rulebook import firewall_rulebook
+from cc4lab.policies.rulebook import RUNGS, firewall_rulebook, make_rulebook
 from cc4lab.rollout import make_rollout_fn
 
 
-def mean_return(env, policy, episodes: int) -> tuple[float, float]:
+def mean_return(env, policy, episodes: int, seed_start: int = 0) -> tuple[float, float]:
     fn = make_rollout_fn(env, policy, E.EPISODE_LENGTH)
     totals = []
-    for ep in range(episodes):
+    for ep in range(seed_start, seed_start + episodes):
         key = jax.random.PRNGKey(ep)
         _, state = E.reset(env, key)
         _, traj = fn(state, key)
@@ -41,6 +41,7 @@ def main() -> None:
         "models", nargs="+", help="paths to model_<tag>.safetensors (sidecar recipe_<tag>.yaml must sit beside each)"
     )
     ap.add_argument("--episodes", type=int, default=8)
+    ap.add_argument("--seed-start", type=int, default=0, help="first episode seed (RULEBOOK.md §6.2: 1000 = selection set)")
     args = ap.parse_args()
 
     E.describe_backend()
@@ -51,11 +52,12 @@ def main() -> None:
         policies[Path(path).stem] = load_policy(path)
     policies |= {
         "firewall_rulebook": firewall_rulebook,
+        "rulebook_L2": make_rulebook(RUNGS["L2"]),
         "random_valid": trivial.random_valid,
         "always_sleep": trivial.always_sleep,
     }
     for name, policy in policies.items():
-        mean, std = mean_return(env, policy, args.episodes)
+        mean, std = mean_return(env, policy, args.episodes, args.seed_start)
         se = std / np.sqrt(args.episodes)
         print(f"{name:28s} mean return {mean:9.1f} +/- {se:6.1f} (std {std:7.1f}, n={args.episodes})")
 

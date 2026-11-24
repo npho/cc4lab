@@ -42,12 +42,13 @@ from cc4lab.attribution.loo import loo_values
 from cc4lab.attribution.shapley import shapley_values
 from cc4lab.failures import TERMS, find_windows, observed_profile, plan
 from cc4lab.policies.loaders import checkpoint_info, load_policy
-from cc4lab.policies.rulebook import firewall_rulebook
+from cc4lab.policies.rulebook import RUNGS, firewall_rulebook, make_rulebook
 from cc4lab.policies.trivial import always_sleep
 
 DEFAULT_MODEL = Path.home() / "cc4lab-exp/ippo_jax/default_seed42/model_default_seed42.safetensors"
 RESULTS = Path(__file__).resolve().parents[1] / "results" / "attribution"
-REFERENCES = {"sleep": always_sleep, "rulebook": firewall_rulebook}
+REFERENCES = {"sleep": always_sleep, "rulebook": firewall_rulebook} | {name: make_rulebook(cfg) for name, cfg in RUNGS.items()}
+"""``rulebook`` is the original firewall-only agent (= rung L1); rung names are the RULEBOOK.md ladder."""
 
 
 def main() -> None:
@@ -63,11 +64,13 @@ def main() -> None:
     where.add_argument("--lookback", type=int, default=20, help="branch this many steps before the window")
     where.add_argument("--tail", type=int, default=50, help="evaluate this many steps after the window")
     p.add_argument("--keys", type=int, default=4, help="K, including the observed key")
-    p.add_argument("--reference", choices=REFERENCES, default="sleep")
+    p.add_argument("--reference", choices=REFERENCES, default="sleep", help="sleep, rulebook, or a ladder rung (L1, L2, L3, L5, ...)")
     p.add_argument("--cost-mode", choices=("raw", "busy_corrected"), default="raw")
     p.add_argument("--batch-mode", choices=("map", "vmap"), default="map")
     p.add_argument("--out", default="attribution.json")
     args = p.parse_args()
+    if args.reference in RUNGS and RUNGS[args.reference].needs_busy_corrected and args.cost_mode != "busy_corrected":
+        p.error(f"--reference {args.reference} can emit Restore; use --cost-mode busy_corrected (RULEBOOK.md §6.3)")
 
     backend = E.describe_backend()
     info = checkpoint_info(args.model)
