@@ -32,13 +32,13 @@ from jaxborg.observations import CYBORG_POS_TO_JAX_ID, SUBNET_BLOCK_SIZE
 _SLOTS = BLUE_MAX_OBSERVED_SUBNETS
 
 
-def firewall_candidates(obs: jax.Array, masks: jax.Array) -> tuple[jax.Array, jax.Array]:
-    """For one agent: the fixing action for every (observed slot, CybORG column), and where a fix is needed.
+def firewall_cells(obs: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """Decode one agent's ``obs`` into its firewall cells, each ``(slots, NUM_SUBNETS)``.
 
-    ``obs`` is ``(OBS_DIM,)``, ``masks`` is ``(ACTION_DIM,)``. Returns
-    ``(action, needs_fix)``, both ``(slots, NUM_SUBNETS)``; ``needs_fix`` is True
-    only where the firewall disagrees with the policy, the slot is real, the
-    column is not the subnet itself, and the action is valid under ``masks``.
+    Returns ``(index, real, blocked, comms)``: the traffic-action offset for the
+    cell (Block = ``BLUE_BLOCK_TRAFFIC_START + index``, Allow likewise), whether
+    it is a real link (observed slot, not the subnet itself), the firewall bit
+    and the policy bit ("should be blocked"). Column j is CybORG position j.
     """
     blocks = obs[1 : 1 + _SLOTS * SUBNET_BLOCK_SIZE].reshape(_SLOTS, SUBNET_BLOCK_SIZE)
     n = NUM_SUBNETS
@@ -49,8 +49,21 @@ def firewall_candidates(obs: jax.Array, masks: jax.Array) -> tuple[jax.Array, ja
     src = to_jax[None, :]  # (1, n): column j <-> absolute subnet id
     src_offset = jnp.where(src < dst, src, src - 1)
     index = src_offset * _SLOTS + jnp.arange(_SLOTS)[:, None]
+    real = active[:, None] & (src != dst)
+    return index, real, blocked, comms
+
+
+def firewall_candidates(obs: jax.Array, masks: jax.Array) -> tuple[jax.Array, jax.Array]:
+    """For one agent: the fixing action for every (observed slot, CybORG column), and where a fix is needed.
+
+    ``obs`` is ``(OBS_DIM,)``, ``masks`` is ``(ACTION_DIM,)``. Returns
+    ``(action, needs_fix)``, both ``(slots, NUM_SUBNETS)``; ``needs_fix`` is True
+    only where the firewall disagrees with the policy, the slot is real, the
+    column is not the subnet itself, and the action is valid under ``masks``.
+    """
+    index, real, blocked, comms = firewall_cells(obs)
     action = jnp.where(comms, BLUE_BLOCK_TRAFFIC_START + index, BLUE_ALLOW_TRAFFIC_START + index)
-    needs_fix = active[:, None] & (src != dst) & (blocked != comms) & (masks[action] > 0)
+    needs_fix = real & (blocked != comms) & (masks[action] > 0)
     return action, needs_fix
 
 

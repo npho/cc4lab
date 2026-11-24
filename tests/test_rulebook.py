@@ -105,3 +105,39 @@ def test_violation_flags(world):
     final, _ = make_rollout_fn(env, firewall_rulebook, 25)(state, key)
     quiet = firewall_violations(obs_of(env, final), jnp.full(E.N_BLUE, BLUE_SLEEP, jnp.int32))
     assert not np.asarray(quiet["firewall_mismatch"]).any() and not np.asarray(quiet["firewall_unaddressed"]).any()
+
+
+def test_traffic_action_kind_matches_state_tables(world):
+    """Every Block/Allow action of every agent, built with jaxborg's encoder, classified against the state tables."""
+    from cc4lab.rules import TRAFFIC_KINDS, traffic_action_kind
+
+    env, key, state = world
+    # a few random steps so the firewall holds both blocked and open links
+    from cc4lab.policies.trivial import random_valid
+
+    state, _ = make_rollout_fn(env, random_valid, 30)(state, key)
+    obs = obs_of(env, state)
+    const, phase = state.const, int(state.state.mission_phase)
+    policy, blocked = np.asarray(const.comms_policy[phase]), np.asarray(state.state.blocked_zones)
+    seen = set()
+    for a in range(E.N_BLUE):
+        for d in np.asarray(const.blue_obs_subnets[a]):
+            if d < 0:
+                continue
+            for s in range(9):
+                if s == d:
+                    continue
+                for name in ("BlockTrafficZone", "AllowTrafficZone"):
+                    act = encode_blue_action(name, -1, a, const=const, src_subnet=s, dst_subnet=int(d))
+                    is_block, is_allow, kind = traffic_action_kind(obs[a], jnp.asarray(act))
+                    if name == "BlockTrafficZone":
+                        want = "redundant" if blocked[d, s] else ("compliant" if policy[d, s] else "violating")
+                        assert bool(is_block) and not bool(is_allow)
+                    else:
+                        want = "redundant" if not blocked[d, s] else ("violating" if policy[d, s] else "compliant")
+                        assert bool(is_allow) and not bool(is_block)
+                    assert TRAFFIC_KINDS[int(kind)] == want, (a, name, int(d), s, TRAFFIC_KINDS[int(kind)], want)
+                    seen.add((name, want))
+    assert len(seen) >= 4, seen  # non-vacuous: several (action, kind) combinations occurred
+    _, _, kind = traffic_action_kind(obs[0], jnp.asarray(BLUE_SLEEP))
+    assert int(kind) == -1
