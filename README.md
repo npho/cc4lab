@@ -71,9 +71,14 @@ install. cc4lab never needs them to run; two cases do:
   This writes `model_<tag>.safetensors` and `recipe_<tag>.yaml` under
   `$JAXBORG_EXP_DIR/ippo_jax/<tag>/`. MLflow also drops run artifacts in
   `./mlruns` of the launch directory (gitignored here), regardless of `JAXBORG_EXP_DIR`. Measured on CPU: ~74 s one-time compile,
-  then ~350 steps/s at 8 envs, so 500k steps is roughly 25 min and the
-  recipe's 3M about 2.5 h (48 envs, the recipe default, not measured). The
-  recipe notes say returns plateau by ~500k steps.
+  then ~350 steps/s at 8 envs in a short run. Full 500k-step runs took longer:
+  2326 s (~39 min, ~215 steps/s average, alongside test runs) for seed 42, and
+  about 78 min each for seeds 43-45 trained three in parallel. Budget 25-40 min
+  for one run alone; the recipe's 3M is several hours (48 envs, the recipe
+  default, not measured). The recipe notes say returns plateau by ~500k steps,
+  but returns fluctuate between checkpoints and differ across seeds, so use the
+  final checkpoint and report across seeds (`NOTES.md`, "First trained policy
+  and reference comparison" and "Four training seeds").
 
   Load and check a checkpoint with `cc4lab.policies.loaders.load_policy`, or
   play it (several checkpoints at once are fine) against the baselines (random, sleep, firewall rulebook):
@@ -107,7 +112,7 @@ If cc4lab ends up leaning on jaxborg's repo tree, moving to a git submodule
 `[tool.uv.sources]`, point `scripts/pin_jaxborg_lock.py` at the submodule, and
 restore the `git -C` commit lookup in `describe_backend()`) is a one-commit change.
 
-## Attribution (Milestone 2, in progress)
+## Attribution
 
 `cc4lab.attribution` computes exact Shapley values (`shapley_values`) and the
 leave-one-out baseline (`loo_values`) from the 32 coalition values. Coalition
@@ -154,10 +159,11 @@ See `NOTES.md`, "Coalition rollouts and the first end-to-end attribution".
 uv run python scripts/spike/benchmark.py      # throughput vs batch size
 uv run python scripts/spike/branching.py      # branch determinism + action timers
 uv run python scripts/spike/variance.py       # seed count K, CRN vs independent
+uv run python scripts/spike/variance_trained.py MODEL.safetensors  # re-measure K per agent with a trained policy
 uv run python scripts/spike/reward_check.py   # team vs per-agent reward, per-zone terms
 ```
 
-Each writes to `results/spike/` (gitignored). Findings are logged in `NOTES.md`.
+Each writes to `results/spike/` (gitignored); `variance_trained.py` needs a checkpoint (see above). Findings are logged in `NOTES.md`.
 
 ## GPU runs on unagi
 
